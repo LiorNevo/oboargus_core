@@ -1,0 +1,13 @@
+[package]
+name = "obolargus-core"
+version = "0.1.0"
+description = "Shared financial domain library for Obolargus"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lx_engine = { path = "../lx_engine" }
+chrono.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
