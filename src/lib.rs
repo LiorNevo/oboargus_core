@@ -9,6 +9,9 @@
 /// Precise decimal parsing for monetary values (no floating point).
 pub mod decimal;
 
+/// The high-level financial domain model (see `specs/015-database-uml-domains/spec.md`).
+pub mod domain;
+
 /// The crate version, taken from `Cargo.toml` at compile time.
 ///
 /// Kept as a stable constant so generated documentation and health checks
