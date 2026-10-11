@@ -1,7 +1,7 @@
 //! Delete an `Asset` row. Rejects deletion if the asset has reference data.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::AssetId;

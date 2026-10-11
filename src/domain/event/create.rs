@@ -1,5 +1,5 @@
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::event::entity::{Event, NewEvent};

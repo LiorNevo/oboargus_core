@@ -1,8 +1,8 @@
 //! Delete a `Portfolio` row. Rejects deletion of a portfolio that has
 //! children, events, or positions. Implements FR-019 and US5b.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::PortfolioId;
@@ -25,11 +25,12 @@ pub async fn delete_portfolio(pool: &PgPool, id: PortfolioId) -> Result<(), Doma
         ));
     }
 
-    let (event_count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM events WHERE portfolio_id = $1 OR to_portfolio_id = $1")
-            .bind(id.as_uuid())
-            .fetch_one(pool)
-            .await?;
+    let (event_count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM events WHERE portfolio_id = $1 OR to_portfolio_id = $1",
+    )
+    .bind(id.as_uuid())
+    .fetch_one(pool)
+    .await?;
     if event_count > 0 {
         return Err(DomainError::cannot_delete(
             "Portfolio",

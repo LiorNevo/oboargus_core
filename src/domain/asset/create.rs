@@ -1,12 +1,12 @@
 //! Create an `Asset` row.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::asset::entity::{Asset, NewAsset};
 use crate::domain::asset::no_self_investment;
 use crate::domain::error::DomainError;
-use crate::domain::id::{new_uuid, AssetId};
+use crate::domain::id::{AssetId, new_uuid};
 
 /// Create a new asset. Enforces the no-self-investment invariant before
 /// insertion.

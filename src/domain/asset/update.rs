@@ -1,8 +1,8 @@
 //! Update an `Asset` row. Rejects patches to `id`, `created_at`,
 //! `backed_by_portfolio_id`, and `issuer_id` with `DomainError::Immutable`.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::asset::entity::{Asset, AssetPatch};
 use crate::domain::asset::read;

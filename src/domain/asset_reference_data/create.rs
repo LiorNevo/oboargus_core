@@ -1,5 +1,5 @@
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::asset_reference_data::entity::{AssetReferenceData, NewAssetReferenceData};
 use crate::domain::error::DomainError;

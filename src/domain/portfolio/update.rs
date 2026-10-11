@@ -1,8 +1,8 @@
 //! Update a `Portfolio` row. Rejects patches to `id`, `created_at`, or
 //! `created_by` with `DomainError::Immutable`.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::PortfolioId;

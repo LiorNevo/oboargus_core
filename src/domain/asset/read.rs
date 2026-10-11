@@ -1,7 +1,7 @@
 //! Read `Asset` rows.
 
-use sqlx::{PgPool, QueryBuilder};
 use crate::domain::id::DomainId;
+use sqlx::{PgPool, QueryBuilder};
 
 use crate::domain::asset::entity::{Asset, AssetFilter};
 use crate::domain::error::DomainError;

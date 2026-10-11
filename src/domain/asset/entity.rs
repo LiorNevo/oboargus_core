@@ -1,7 +1,7 @@
 //! `Asset` struct and input/patch types.
 
-use chrono::{DateTime, Utc};
 use crate::domain::id::DomainId;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 

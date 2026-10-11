@@ -73,7 +73,10 @@ mod tests {
         assert_eq!(event.asset_id(), asset_id);
         assert!(event.to_portfolio_id_opt().is_none());
         assert_eq!(event.event_type().unwrap(), EventType::Buy);
-        assert_eq!(EventType::from_str("transfer").unwrap(), EventType::Transfer);
+        assert_eq!(
+            EventType::from_str("transfer").unwrap(),
+            EventType::Transfer
+        );
         assert!(EventType::from_str("nope").is_err());
         assert_eq!(EventType::Transfer.as_str(), "transfer");
         assert_eq!(EventType::Buy.to_string(), "buy");

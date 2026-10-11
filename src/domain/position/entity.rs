@@ -1,8 +1,8 @@
 //! Position: the current state of a holding in a portfolio. Derived from
 //! events; not directly constructible.
 
-use chrono::{DateTime, Utc};
 use crate::domain::id::DomainId;
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;

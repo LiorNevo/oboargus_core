@@ -1,5 +1,5 @@
-use chrono::NaiveDate;
 use crate::domain::id::DomainId;
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -19,9 +19,13 @@ pub struct IssuerReferenceData {
 
 impl IssuerReferenceData {
     /// Implements FR-008 of spec 016-implement-domain-model.
-    pub fn id(&self) -> ReferenceDataId { ReferenceDataId::from_uuid(self.id) }
+    pub fn id(&self) -> ReferenceDataId {
+        ReferenceDataId::from_uuid(self.id)
+    }
     /// Implements FR-008 of spec 016-implement-domain-model.
-    pub fn issuer_id(&self) -> IssuerId { IssuerId::from_uuid(self.issuer_id) }
+    pub fn issuer_id(&self) -> IssuerId {
+        IssuerId::from_uuid(self.issuer_id)
+    }
 }
 
 #[derive(Debug, Clone)]

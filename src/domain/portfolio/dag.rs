@@ -1,7 +1,7 @@
 //! DAG cycle detection for the portfolio self-referential edge.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::PortfolioId;

@@ -1,5 +1,5 @@
-use chrono::NaiveDate;
 use crate::domain::id::DomainId;
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -19,9 +19,13 @@ pub struct AssetReferenceData {
 
 impl AssetReferenceData {
     /// Implements FR-008 of spec 016-implement-domain-model.
-    pub fn id(&self) -> ReferenceDataId { ReferenceDataId::from_uuid(self.id) }
+    pub fn id(&self) -> ReferenceDataId {
+        ReferenceDataId::from_uuid(self.id)
+    }
     /// Implements FR-008 of spec 016-implement-domain-model.
-    pub fn asset_id(&self) -> AssetId { AssetId::from_uuid(self.asset_id) }
+    pub fn asset_id(&self) -> AssetId {
+        AssetId::from_uuid(self.asset_id)
+    }
 }
 
 #[derive(Debug, Clone)]

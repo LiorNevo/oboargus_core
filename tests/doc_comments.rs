@@ -38,7 +38,10 @@ fn public_functions_mention_fr(path: &Path) -> Result<(), String> {
         }
     }
     if saw_pub_fn && !saw_fr {
-        return Err(format!("{}: public function(s) found but no doc comment mentions 'FR-'", path.display()));
+        return Err(format!(
+            "{}: public function(s) found but no doc comment mentions 'FR-'",
+            path.display()
+        ));
     }
     Ok(())
 }

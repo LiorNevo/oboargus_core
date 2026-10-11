@@ -73,31 +73,51 @@ impl DomainError {
     /// Construct a `NotFound` error for a given entity and id.
     /// Implements FR-004 of spec 016-implement-domain-model.
     pub fn not_found(entity: &'static str, id: impl fmt::Display) -> Self {
-        Self::NotFound { entity, id: id.to_string() }
+        Self::NotFound {
+            entity,
+            id: id.to_string(),
+        }
     }
 
     /// Construct an `InvariantViolation` error.
     /// Implements FR-004 of spec 016-implement-domain-model.
     pub fn invariant(invariant: &'static str, detail: impl fmt::Display) -> Self {
-        Self::InvariantViolation { invariant, detail: detail.to_string() }
+        Self::InvariantViolation {
+            invariant,
+            detail: detail.to_string(),
+        }
     }
 
     /// Construct an `Immutable` error for a field.
     /// Implements FR-004 of spec 016-implement-domain-model.
     pub fn immutable_field(entity: &'static str, field: &'static str) -> Self {
-        Self::Immutable { entity, field: Some(field) }
+        Self::Immutable {
+            entity,
+            field: Some(field),
+        }
     }
 
     /// Construct an `Immutable` error for a whole record.
     /// Implements FR-004 of spec 016-implement-domain-model.
     pub fn immutable_record(entity: &'static str) -> Self {
-        Self::Immutable { entity, field: None }
+        Self::Immutable {
+            entity,
+            field: None,
+        }
     }
 
     /// Construct a `CannotDelete` error.
     /// Implements FR-004 of spec 016-implement-domain-model.
-    pub fn cannot_delete(entity: &'static str, id: impl fmt::Display, reason: impl fmt::Display) -> Self {
-        Self::CannotDelete { entity, id: id.to_string(), reason: reason.to_string() }
+    pub fn cannot_delete(
+        entity: &'static str,
+        id: impl fmt::Display,
+        reason: impl fmt::Display,
+    ) -> Self {
+        Self::CannotDelete {
+            entity,
+            id: id.to_string(),
+            reason: reason.to_string(),
+        }
     }
 }
 
@@ -110,11 +130,26 @@ mod tests {
     #[test]
     fn domain_error_variants_are_exhaustive() {
         let _: DomainError = DomainError::Validation("x".to_string());
-        let _: DomainError = DomainError::NotFound { entity: "X", id: "y".to_string() };
-        let _: DomainError = DomainError::InvariantViolation { invariant: "i", detail: "d".to_string() };
-        let _: DomainError = DomainError::Immutable { entity: "X", field: None };
-        let _: DomainError = DomainError::CannotDelete { entity: "X", id: "y".to_string(), reason: "r".to_string() };
-        let _: DomainError = DomainError::UnsupportedEventType { event_type: "x".to_string() };
+        let _: DomainError = DomainError::NotFound {
+            entity: "X",
+            id: "y".to_string(),
+        };
+        let _: DomainError = DomainError::InvariantViolation {
+            invariant: "i",
+            detail: "d".to_string(),
+        };
+        let _: DomainError = DomainError::Immutable {
+            entity: "X",
+            field: None,
+        };
+        let _: DomainError = DomainError::CannotDelete {
+            entity: "X",
+            id: "y".to_string(),
+            reason: "r".to_string(),
+        };
+        let _: DomainError = DomainError::UnsupportedEventType {
+            event_type: "x".to_string(),
+        };
     }
 
     /// Confirms the `From<sqlx::Error>` impl exists via `?` in a function that

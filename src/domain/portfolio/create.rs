@@ -1,15 +1,18 @@
 //! Create a `Portfolio` row, enforcing the DAG-acylclicity invariant.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
-use crate::domain::id::{new_uuid, PortfolioId};
-use crate::domain::portfolio::{dag, entity::Portfolio, entity::NewPortfolio};
+use crate::domain::id::{PortfolioId, new_uuid};
+use crate::domain::portfolio::{dag, entity::NewPortfolio, entity::Portfolio};
 
 /// Create a new portfolio. Enforces the portfolio-graph-is-a-DAG invariant
 /// (no self-loop, no cycle) before insertion. Implements FR-002 and US1.
-pub async fn create_portfolio(pool: &PgPool, input: NewPortfolio) -> Result<Portfolio, DomainError> {
+pub async fn create_portfolio(
+    pool: &PgPool,
+    input: NewPortfolio,
+) -> Result<Portfolio, DomainError> {
     if let Some(parent_id) = input.parent_id {
         let child_id = PortfolioId::from_uuid(new_uuid());
         if dag::is_self_parent(child_id, parent_id) {

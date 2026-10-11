@@ -7,9 +7,9 @@
 //! `StockBasedCompensation`) return a typed `UnsupportedEventType` error
 //! because their per-type attribute schemas (D1) are deferred.
 
+use crate::domain::id::DomainId;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use crate::domain::id::DomainId;
 
 use crate::domain::error::DomainError;
 use crate::domain::event::entity::Event;
@@ -109,5 +109,9 @@ where
         quantity,
         as_of: as_of.unwrap_or_else(Utc::now),
     };
-    Ok(ReplaySummary { position, events_applied: applied, events_skipped: skipped })
+    Ok(ReplaySummary {
+        position,
+        events_applied: applied,
+        events_skipped: skipped,
+    })
 }

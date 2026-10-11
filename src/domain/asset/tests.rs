@@ -3,10 +3,10 @@
 //! Implements FR-008 and the US2 asset acceptance scenarios. Gated by
 //! `DATABASE_URL`.
 
+use crate::domain::asset::entity::{AssetFilter, AssetPatch, NewAsset};
 use crate::domain::asset::{
     check_no_self_investment, create_asset, delete_asset, get_asset, update_asset,
 };
-use crate::domain::asset::entity::{AssetFilter, AssetPatch, NewAsset};
 use crate::domain::error::DomainError;
 use crate::domain::id::{AssetId, DomainId};
 use crate::domain::portfolio::create_portfolio;
@@ -25,12 +25,21 @@ async fn pool() -> Option<PgPool> {
 
 #[tokio::test]
 async fn create_asset_persists_with_issuer() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     // Create a real issuer first (so the foreign key resolves).
     let issuer_id = uuid::Uuid::new_v4();
-    sqlx::query("INSERT INTO issuers (id, name, issuer_type, legal_jurisdiction) VALUES ($1, $2, $3, $4)")
-        .bind(issuer_id).bind("Test Issuer").bind("test").bind("US")
-        .execute(&pool).await.expect("insert issuer");
+    sqlx::query(
+        "INSERT INTO issuers (id, name, issuer_type, legal_jurisdiction) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(issuer_id)
+    .bind("Test Issuer")
+    .bind("test")
+    .bind("US")
+    .execute(&pool)
+    .await
+    .expect("insert issuer");
     let asset = create_asset(
         &pool,
         NewAsset {
@@ -50,7 +59,9 @@ async fn create_asset_persists_with_issuer() {
 
 #[tokio::test]
 async fn create_asset_without_issuer_succeeds() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     let asset = create_asset(
         &pool,
         NewAsset {
@@ -68,10 +79,17 @@ async fn create_asset_without_issuer_succeeds() {
 
 #[tokio::test]
 async fn create_portfolio_backed_asset_persists_back_reference() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     let portfolio = create_portfolio(
         &pool,
-        NewPortfolio { name: "ETF".into(), purpose: "p".into(), created_by: "t".into(), parent_id: None },
+        NewPortfolio {
+            name: "ETF".into(),
+            purpose: "p".into(),
+            created_by: "t".into(),
+            parent_id: None,
+        },
     )
     .await
     .expect("create portfolio");
@@ -92,10 +110,17 @@ async fn create_portfolio_backed_asset_persists_back_reference() {
 
 #[tokio::test]
 async fn no_self_investment_rejects_self_back_reference() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     let portfolio = create_portfolio(
         &pool,
-        NewPortfolio { name: "P".into(), purpose: "p".into(), created_by: "t".into(), parent_id: None },
+        NewPortfolio {
+            name: "P".into(),
+            purpose: "p".into(),
+            created_by: "t".into(),
+            parent_id: None,
+        },
     )
     .await
     .expect("create portfolio");
@@ -109,7 +134,9 @@ async fn no_self_investment_rejects_self_back_reference() {
 
 #[tokio::test]
 async fn update_asset_non_key_fields() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     let asset = create_asset(
         &pool,
         NewAsset {
@@ -125,7 +152,10 @@ async fn update_asset_non_key_fields() {
     let updated = update_asset(
         &pool,
         asset.id(),
-        AssetPatch { display_name: Some("After".into()), ..Default::default() },
+        AssetPatch {
+            display_name: Some("After".into()),
+            ..Default::default()
+        },
     )
     .await
     .expect("update");
@@ -144,7 +174,9 @@ async fn update_asset_currency_is_immutable_via_patch() {
 
 #[tokio::test]
 async fn delete_asset_with_no_dependents_succeeds() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     let asset = create_asset(
         &pool,
         NewAsset {
@@ -159,12 +191,20 @@ async fn delete_asset_with_no_dependents_succeeds() {
     .expect("create");
     delete_asset(&pool, asset.id()).await.expect("delete");
     let res = get_asset(&pool, asset.id()).await;
-    assert!(matches!(res, Err(DomainError::NotFound { entity: "Asset", .. })));
+    assert!(matches!(
+        res,
+        Err(DomainError::NotFound {
+            entity: "Asset",
+            ..
+        })
+    ));
 }
 
 #[tokio::test]
 async fn delete_asset_with_reference_data_is_rejected() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     let asset = create_asset(
         &pool,
         NewAsset {
@@ -189,6 +229,12 @@ async fn delete_asset_with_reference_data_is_rejected() {
         .bind("t")
         .execute(&pool).await.expect("insert ref data");
     let res = delete_asset(&pool, asset.id()).await;
-    assert!(matches!(res, Err(DomainError::CannotDelete { entity: "Asset", .. })));
+    assert!(matches!(
+        res,
+        Err(DomainError::CannotDelete {
+            entity: "Asset",
+            ..
+        })
+    ));
     let _ = AssetFilter::default();
 }

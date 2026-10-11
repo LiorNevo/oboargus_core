@@ -1,7 +1,7 @@
 //! Enforce the no-self-investment invariant.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::{AssetId, PortfolioId};

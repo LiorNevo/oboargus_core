@@ -26,5 +26,8 @@ pub mod seed;
 mod tests;
 
 pub use error::DomainError;
-pub use model_description::{model_description, EntityDescription, FieldDescription, ModelDescription, RelationshipDescription};
-pub use seed::{seed_canonical_dataset, SeedSummary};
+pub use model_description::{
+    EntityDescription, FieldDescription, ModelDescription, RelationshipDescription,
+    model_description,
+};
+pub use seed::{SeedSummary, seed_canonical_dataset};

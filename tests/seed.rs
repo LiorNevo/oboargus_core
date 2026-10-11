@@ -15,17 +15,25 @@ async fn pool() -> Option<PgPool> {
 
 #[tokio::test]
 async fn seed_creates_documented_entities() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     let summary = seed_canonical_dataset(&pool).await.expect("seed");
     // The seed reports the existing counts (which include any previous
     // seeded data on the database). All three entities must be present
     // after a seed run.
     let issuer_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM issuers")
-        .fetch_one(&pool).await.expect("count issuers");
+        .fetch_one(&pool)
+        .await
+        .expect("count issuers");
     let asset_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM assets")
-        .fetch_one(&pool).await.expect("count assets");
+        .fetch_one(&pool)
+        .await
+        .expect("count assets");
     let portfolio_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM portfolios")
-        .fetch_one(&pool).await.expect("count portfolios");
+        .fetch_one(&pool)
+        .await
+        .expect("count portfolios");
     assert!(issuer_count >= 1, "expected at least 1 issuer");
     assert!(asset_count >= 1, "expected at least 1 asset");
     assert!(portfolio_count >= 1, "expected at least 1 portfolio");
@@ -34,7 +42,9 @@ async fn seed_creates_documented_entities() {
 
 #[tokio::test]
 async fn seed_is_idempotent() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     let first = seed_canonical_dataset(&pool).await.expect("seed 1");
     let second = seed_canonical_dataset(&pool).await.expect("seed 2");
     // The second run is a no-op for inserts: the canonical issuer already
@@ -48,7 +58,9 @@ async fn seed_is_idempotent() {
 
 #[tokio::test]
 async fn human_readable_names() {
-    let Some(pool) = pool().await else { return; };
+    let Some(pool) = pool().await else {
+        return;
+    };
     // The seed creates an asset with a human-readable display name.
     let name: String = sqlx::query_scalar(
         "SELECT display_name FROM assets WHERE display_name LIKE '%Vanguard%' LIMIT 1",

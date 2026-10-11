@@ -13,4 +13,4 @@ mod tests;
 
 pub use entity::Position;
 pub use read::{get_position, list_positions_for_asset, list_positions_for_portfolio};
-pub use replay::{replay_events, ReplaySummary};
+pub use replay::{ReplaySummary, replay_events};

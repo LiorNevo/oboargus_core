@@ -69,7 +69,14 @@ fn replay_transfer_skips_other_portfolios() {
     let today = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
     // A transfer FROM src TO dst with quantity_delta = -30 (sign convention:
     // the source side of a transfer has a negative delta).
-    let events = vec![make_event(EventType::Transfer, today, -30, src, a, Some(dst))];
+    let events = vec![make_event(
+        EventType::Transfer,
+        today,
+        -30,
+        src,
+        a,
+        Some(dst),
+    )];
     let src_summary = replay_events(src, a, &events).expect("replay src");
     assert_eq!(src_summary.position.quantity, Decimal::from(-30));
     assert_eq!(src_summary.events_applied, 1);

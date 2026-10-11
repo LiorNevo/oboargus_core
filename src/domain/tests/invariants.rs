@@ -55,7 +55,11 @@ fn invariant_02_no_self_investment() {
     let desc = model_description();
     // The exact invariant string contains a hyphen; assert on a substring
     // that's stable across edits.
-    assert!(desc.invariants.iter().any(|i| i.starts_with("An asset may not be backed by a portfolio that contains itself")));
+    assert!(
+        desc.invariants.iter().any(
+            |i| i.starts_with("An asset may not be backed by a portfolio that contains itself")
+        )
+    );
 }
 
 #[test]
@@ -70,7 +74,11 @@ fn invariant_03_any_level_carries_accounting() {
 fn invariant_04_positions_derived_from_events() {
     // Tested in `position::tests::get_position_returns_materialized_position_after_event`.
     let desc = model_description();
-    assert!(desc.invariants.iter().any(|i| i.contains("derived from events")));
+    assert!(
+        desc.invariants
+            .iter()
+            .any(|i| i.contains("derived from events"))
+    );
 }
 
 #[test]
@@ -102,7 +110,12 @@ fn invariant_08_per_field_aggregates_declared() {
     let desc = model_description();
     for e in &desc.entities {
         for f in &e.fields {
-            assert!(!f.aggregates.is_empty(), "field {} on entity {} has no aggregates", f.name, e.name);
+            assert!(
+                !f.aggregates.is_empty(),
+                "field {} on entity {} has no aggregates",
+                f.name,
+                e.name
+            );
         }
     }
 }
@@ -115,7 +128,12 @@ fn invariant_09_last_is_time_coordinated() {
     // runtime semantics are tested implicitly by the
     // `get_current_*_reference_data_returns_latest_knowledge` tests.
     let desc = model_description();
-    assert!(desc.entities.iter().flat_map(|e| e.fields.iter()).any(|f| f.aggregates.contains(&"last")));
+    assert!(
+        desc.entities
+            .iter()
+            .flat_map(|e| e.fields.iter())
+            .any(|f| f.aggregates.contains(&"last"))
+    );
 }
 
 #[test]
@@ -126,8 +144,18 @@ fn invariant_10_numeric_only_constraint() {
     for e in &desc.entities {
         for f in &e.fields {
             if f.type_domain != "decimal" {
-                assert!(!f.aggregates.contains(&"sum"), "non-decimal field {} on {} declares sum", f.name, e.name);
-                assert!(!f.aggregates.contains(&"avg"), "non-decimal field {} on {} declares avg", f.name, e.name);
+                assert!(
+                    !f.aggregates.contains(&"sum"),
+                    "non-decimal field {} on {} declares sum",
+                    f.name,
+                    e.name
+                );
+                assert!(
+                    !f.aggregates.contains(&"avg"),
+                    "non-decimal field {} on {} declares avg",
+                    f.name,
+                    e.name
+                );
             }
         }
     }
@@ -140,7 +168,12 @@ fn invariant_11_identity_fields_are_none() {
     for e in &desc.entities {
         for f in &e.fields {
             if f.name == "id" {
-                assert_eq!(f.aggregates, &["none"], "id field on {} does not declare none", e.name);
+                assert_eq!(
+                    f.aggregates,
+                    &["none"],
+                    "id field on {} does not declare none",
+                    e.name
+                );
             }
         }
     }

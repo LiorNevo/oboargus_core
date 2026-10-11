@@ -1,5 +1,5 @@
-use chrono::NaiveDate;
 use crate::domain::id::DomainId;
+use chrono::NaiveDate;
 use sqlx::PgPool;
 
 use crate::domain::error::DomainError;

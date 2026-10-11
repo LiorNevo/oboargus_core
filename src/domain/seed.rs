@@ -5,8 +5,8 @@
 //! a handful of reference-data records) that the test suite can use as a
 //! fixed starting point.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::asset::create as asset_create;
 use crate::domain::asset::entity::{AssetFilter, NewAsset};
@@ -15,7 +15,7 @@ use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
 use crate::domain::error::DomainError;
 use crate::domain::event::create as event_create;
 use crate::domain::event::entity::NewEvent;
-use crate::domain::id::{new_uuid, AssetId, IssuerId, PortfolioId};
+use crate::domain::id::{AssetId, IssuerId, PortfolioId, new_uuid};
 use crate::domain::issuer::create as issuer_create;
 use crate::domain::issuer::entity::NewIssuer;
 use crate::domain::portfolio::create as portfolio_create;
@@ -46,7 +46,9 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
         // Re-seed idempotently: report the existing counts so callers can
         // see what is in the database. We do not re-insert anything.
         summary.issuers_created = existing.len();
-        let _ = crate::domain::asset::read::list_assets(pool, AssetFilter::default()).await.map(|a| summary.assets_created = a.len());
+        let _ = crate::domain::asset::read::list_assets(pool, AssetFilter::default())
+            .await
+            .map(|a| summary.assets_created = a.len());
         return Ok(summary);
     }
 
@@ -202,7 +204,11 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
     .await?;
     summary.reference_data_records_created += 1;
 
-    let _ = (AssetId::from_uuid(new_uuid()), IssuerId::from_uuid(new_uuid()), PortfolioId::from_uuid(new_uuid())); // suppress unused
+    let _ = (
+        AssetId::from_uuid(new_uuid()),
+        IssuerId::from_uuid(new_uuid()),
+        PortfolioId::from_uuid(new_uuid()),
+    ); // suppress unused
     let _ = AssetFilter::default();
 
     Ok(summary)
@@ -217,6 +223,15 @@ mod tests {
     #[test]
     fn default_summary_is_all_zeros() {
         let s = SeedSummary::default();
-        assert_eq!(s, SeedSummary { issuers_created: 0, assets_created: 0, portfolios_created: 0, events_created: 0, reference_data_records_created: 0 });
+        assert_eq!(
+            s,
+            SeedSummary {
+                issuers_created: 0,
+                assets_created: 0,
+                portfolios_created: 0,
+                events_created: 0,
+                reference_data_records_created: 0
+            }
+        );
     }
 }

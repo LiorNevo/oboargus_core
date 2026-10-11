@@ -1,7 +1,7 @@
 //! Event: an immutable record of a state change to a position.
 
-use chrono::{DateTime, NaiveDate, Utc};
 use crate::domain::id::DomainId;
+use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -90,7 +90,9 @@ pub struct Event {
 }
 
 impl AsRef<Event> for Event {
-    fn as_ref(&self) -> &Event { self }
+    fn as_ref(&self) -> &Event {
+        self
+    }
 }
 
 impl Event {

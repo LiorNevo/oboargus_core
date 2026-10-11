@@ -1,16 +1,15 @@
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::IssuerId;
 
 /// Implements FR-019 of spec 016-implement-domain-model.
 pub async fn delete_issuer(pool: &PgPool, id: IssuerId) -> Result<(), DomainError> {
-    let (asset_count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM assets WHERE issuer_id = $1")
-            .bind(id.as_uuid())
-            .fetch_one(pool)
-            .await?;
+    let (asset_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM assets WHERE issuer_id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(pool)
+        .await?;
     if asset_count > 0 {
         return Err(DomainError::cannot_delete(
             "Issuer",

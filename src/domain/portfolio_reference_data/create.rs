@@ -1,9 +1,11 @@
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::new_uuid;
-use crate::domain::portfolio_reference_data::entity::{NewPortfolioReferenceData, PortfolioReferenceData};
+use crate::domain::portfolio_reference_data::entity::{
+    NewPortfolioReferenceData, PortfolioReferenceData,
+};
 
 /// Implements FR-018 of spec 016-implement-domain-model.
 pub async fn create_portfolio_reference_data(

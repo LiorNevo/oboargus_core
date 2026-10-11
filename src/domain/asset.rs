@@ -15,7 +15,7 @@ mod tests;
 
 pub use create::create_asset;
 pub use delete::delete_asset;
-pub use entity::{Asset, AssetFilter, NewAsset, AssetPatch};
+pub use entity::{Asset, AssetFilter, AssetPatch, NewAsset};
 pub use no_self_investment::check_no_self_investment;
 pub use read::{get_asset, list_assets};
 pub use update::update_asset;

@@ -1,7 +1,7 @@
 //! Read `Portfolio` rows.
 
-use sqlx::PgPool;
 use crate::domain::id::DomainId;
+use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::PortfolioId;
@@ -27,7 +27,10 @@ pub async fn get_portfolio(pool: &PgPool, id: PortfolioId) -> Result<Portfolio, 
 /// List the direct children of a portfolio. Returns an empty `Vec` if the
 /// parent has no children.
 /// Implements FR-008 of spec 016-implement-domain-model.
-pub async fn list_children(pool: &PgPool, parent_id: PortfolioId) -> Result<Vec<Portfolio>, DomainError> {
+pub async fn list_children(
+    pool: &PgPool,
+    parent_id: PortfolioId,
+) -> Result<Vec<Portfolio>, DomainError> {
     let rows: Vec<Portfolio> = sqlx::query_as(
         r#"
         SELECT id, name, purpose, created_at, created_by, parent_id
