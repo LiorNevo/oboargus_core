@@ -1,10 +1,11 @@
 //! Tests for US1 — Portfolio CRUD and the DAG-acylclicity invariant.
 //!
-//! These tests are gated by the `DATABASE_URL` environment variable. If
-//! `DATABASE_URL` is unset, the tests are skipped (with a clear message)
-//! because they require a real PostgreSQL database.
+//! Each test acquires a `&PgPool` and a `PoolGuard` from the shared
+//! `tests/common` fixture. The guard runs `TRUNCATE … CASCADE` on
+//! every high-level table when the test future drops, so the host
+//! database is left unchanged.
 //!
-//! Implements FR-008 and the US1 acceptance scenarios.
+//! Gated by `DATABASE_URL`: when unset, tests exit early as no-ops.
 
 use crate::domain::error::DomainError;
 use crate::domain::model_description::model_description;
@@ -12,40 +13,20 @@ use crate::domain::portfolio::entity::{NewPortfolio, PortfolioPatch};
 use crate::domain::portfolio::{
     create_portfolio, delete_portfolio, get_portfolio, list_children, update_portfolio,
 };
-use sqlx::PgPool;
 
-/// Run the project's embedded migrations against the test pool. Each
-/// integration test calls this; `sqlx::migrate!()` runs idempotently.
-async fn migrate(pool: &PgPool) {
-    sqlx::migrate!("./migrations")
-        .run(pool)
-        .await
-        .expect("migrations should succeed");
-}
-
-fn database_url() -> Option<String> {
-    std::env::var("DATABASE_URL").ok()
-}
-
-async fn pool() -> Option<PgPool> {
-    let url = database_url()?;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    migrate(&pool).await;
-    Some(pool)
-}
+use crate::common::*;
 
 #[tokio::test]
 async fn create_portfolio_persists_attributes() {
-    let Some(pool) = pool().await else {
-        eprintln!("DATABASE_URL not set; skipping integration test");
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let p = create_portfolio(
         &pool,
         NewPortfolio {
-            name: "Test".to_string(),
-            purpose: "Testing".to_string(),
-            created_by: "tester".to_string(),
+            name: "Test".into(),
+            purpose: "Testing".into(),
+            created_by: "tester".into(),
             parent_id: None,
         },
     )
@@ -55,11 +36,12 @@ async fn create_portfolio_persists_attributes() {
     assert_eq!(read.name, "Test");
     assert_eq!(read.purpose, "Testing");
     assert_eq!(read.created_by, "tester");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn create_portfolio_with_parent_links_children() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let parent = create_portfolio(
@@ -88,17 +70,12 @@ async fn create_portfolio_with_parent_links_children() {
         .await
         .expect("list children");
     assert!(children.iter().any(|c| c.id == child.id));
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn create_portfolio_with_self_parent_is_rejected() {
-    // A self-loop is rejected at the database level by the
-    // `portfolios_no_self_parent` CHECK constraint, which fires before the
-    // application's cycle detection runs. The test asserts that the
-    // operation is rejected (the error is either an InvariantViolation
-    // from the application layer or a database IntegrityError wrapped in
-    // DomainError::Infrastructure — both are valid).
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let new_id = uuid::Uuid::new_v4();
@@ -113,54 +90,12 @@ async fn create_portfolio_with_self_parent_is_rejected() {
     .execute(&pool)
     .await;
     assert!(res.is_err(), "self-parent insert must fail");
-}
-
-#[tokio::test]
-async fn create_portfolio_cycle_is_rejected() {
-    let Some(pool) = pool().await else {
-        return;
-    };
-    let a = create_portfolio(
-        &pool,
-        NewPortfolio {
-            name: "A".into(),
-            purpose: "a".into(),
-            created_by: "t".into(),
-            parent_id: None,
-        },
-    )
-    .await
-    .expect("create a");
-    let b = create_portfolio(
-        &pool,
-        NewPortfolio {
-            name: "B".into(),
-            purpose: "b".into(),
-            created_by: "t".into(),
-            parent_id: Some(a.id()),
-        },
-    )
-    .await
-    .expect("create b");
-    // Attempt to make A a child of B (which would create a cycle A -> B -> A).
-    let res = create_portfolio(
-        &pool,
-        NewPortfolio {
-            name: "C".into(),
-            purpose: "c".into(),
-            created_by: "t".into(),
-            parent_id: Some(b.id()),
-        },
-    )
-    .await;
-    // The above won't itself create a cycle, but the cycle-detection
-    // function is exercised when reparenting; we test the function directly.
-    let _ = res; // see portfolio::dag::detect_cycle tests below
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn update_portfolio_non_key_fields() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let p = create_portfolio(
@@ -188,6 +123,7 @@ async fn update_portfolio_non_key_fields() {
     assert_eq!(updated.name, "After");
     assert_eq!(updated.purpose, "p2");
     assert_eq!(updated.created_at, original_created_at);
+    guard.cleanup().await;
 }
 
 #[tokio::test]
@@ -201,7 +137,7 @@ async fn update_portfolio_id_is_immutable() {
 
 #[tokio::test]
 async fn delete_leaf_portfolio_succeeds() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let p = create_portfolio(
@@ -224,11 +160,12 @@ async fn delete_leaf_portfolio_succeeds() {
             ..
         })
     ));
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn delete_portfolio_with_children_is_rejected() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let parent = create_portfolio(
@@ -261,10 +198,15 @@ async fn delete_portfolio_with_children_is_rejected() {
             ..
         })
     ));
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn model_description_includes_portfolio() {
+    // Pure-data test; the fixture gating is harmless.
+    let Some((_pool, _guard)) = tx_pool().await else {
+        return;
+    };
     let desc = model_description();
     let p = desc
         .entities

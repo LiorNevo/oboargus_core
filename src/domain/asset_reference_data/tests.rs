@@ -2,6 +2,7 @@
 //!
 //! Implements FR-008. Gated by `DATABASE_URL`.
 
+use crate::common::*;
 use crate::domain::asset::create_asset;
 use crate::domain::asset::entity::NewAsset;
 use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
@@ -11,16 +12,6 @@ use crate::domain::asset_reference_data::{
 };
 use chrono::Utc;
 use sqlx::PgPool;
-
-async fn pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL").ok()?;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations should succeed");
-    Some(pool)
-}
 
 async fn new_asset(pool: &PgPool) -> crate::domain::id::AssetId {
     let asset = create_asset(
@@ -40,7 +31,7 @@ async fn new_asset(pool: &PgPool) -> crate::domain::id::AssetId {
 
 #[tokio::test]
 async fn create_asset_reference_data_persists_record() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let asset_id = new_asset(&pool).await;
@@ -59,11 +50,12 @@ async fn create_asset_reference_data_persists_record() {
     .await
     .expect("create");
     assert_eq!(rec.value, "100.00");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn get_current_asset_reference_data_returns_latest_knowledge() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let asset_id = new_asset(&pool).await;
@@ -102,11 +94,12 @@ async fn get_current_asset_reference_data_returns_latest_knowledge() {
         .expect("present");
     assert_eq!(current.value, "20");
     assert_eq!(current.knowledge_date, k2);
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn get_asset_reference_data_history_returns_all_records_ordered() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let asset_id = new_asset(&pool).await;
@@ -145,11 +138,12 @@ async fn get_asset_reference_data_history_returns_all_records_ordered() {
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].knowledge_date, k2);
     assert_eq!(history[1].knowledge_date, k1);
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn update_asset_reference_value_writes_new_record() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let asset_id = new_asset(&pool).await;
@@ -182,4 +176,5 @@ async fn update_asset_reference_value_writes_new_record() {
         .expect("current")
         .expect("present");
     assert_eq!(current.value, "new");
+    guard.cleanup().await;
 }

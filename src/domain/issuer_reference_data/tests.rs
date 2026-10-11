@@ -1,6 +1,7 @@
 //! Tests for US3 — IssuerReferenceData dual-temporal semantics.
 //! Gated by `DATABASE_URL`.
 
+use crate::common::*;
 use crate::domain::issuer::create_issuer;
 use crate::domain::issuer::entity::NewIssuer;
 use crate::domain::issuer_reference_data::entity::NewIssuerReferenceData;
@@ -10,16 +11,6 @@ use crate::domain::issuer_reference_data::{
 };
 use chrono::Utc;
 use sqlx::PgPool;
-
-async fn pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL").ok()?;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations should succeed");
-    Some(pool)
-}
 
 async fn new_issuer(pool: &PgPool) -> crate::domain::id::IssuerId {
     let issuer = create_issuer(
@@ -37,7 +28,7 @@ async fn new_issuer(pool: &PgPool) -> crate::domain::id::IssuerId {
 
 #[tokio::test]
 async fn create_issuer_reference_data_persists_record() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let issuer_id = new_issuer(&pool).await;
@@ -56,11 +47,12 @@ async fn create_issuer_reference_data_persists_record() {
     .await
     .expect("create");
     assert_eq!(rec.value, "X");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn get_current_issuer_reference_data_returns_latest_knowledge() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let issuer_id = new_issuer(&pool).await;
@@ -98,11 +90,12 @@ async fn get_current_issuer_reference_data_returns_latest_knowledge() {
         .expect("current")
         .expect("present");
     assert_eq!(current.value, "new");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn get_issuer_reference_data_history_returns_all_records_ordered() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let issuer_id = new_issuer(&pool).await;
@@ -141,11 +134,12 @@ async fn get_issuer_reference_data_history_returns_all_records_ordered() {
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].knowledge_date, k2);
     assert_eq!(history[1].knowledge_date, k1);
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn update_issuer_reference_value_writes_new_record() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let issuer_id = new_issuer(&pool).await;
@@ -174,4 +168,5 @@ async fn update_issuer_reference_value_writes_new_record() {
         .expect("current")
         .expect("present");
     assert_eq!(current.value, "new");
+    guard.cleanup().await;
 }

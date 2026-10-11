@@ -1,23 +1,13 @@
 //! Tests for US2 — Issuer CRUD.
 
+use crate::common::*;
 use crate::domain::error::DomainError;
 use crate::domain::issuer::entity::{IssuerPatch, NewIssuer};
 use crate::domain::issuer::{create_issuer, delete_issuer, get_issuer, update_issuer};
-use sqlx::PgPool;
-
-async fn pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL").ok()?;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations should succeed");
-    Some(pool)
-}
 
 #[tokio::test]
 async fn create_issuer_persists_attributes() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let issuer = create_issuer(
@@ -32,11 +22,12 @@ async fn create_issuer_persists_attributes() {
     .expect("create");
     let read = get_issuer(&pool, issuer.id()).await.expect("read");
     assert_eq!(read.name, "Test Co");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn update_issuer_non_key_fields() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let issuer = create_issuer(
@@ -60,11 +51,12 @@ async fn update_issuer_non_key_fields() {
     .await
     .expect("update");
     assert_eq!(updated.name, "After");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn delete_issuer_with_no_dependents_succeeds() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let issuer = create_issuer(
@@ -86,11 +78,12 @@ async fn delete_issuer_with_no_dependents_succeeds() {
             ..
         })
     ));
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn delete_issuer_with_assets_is_rejected() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let issuer = create_issuer(
@@ -118,4 +111,5 @@ async fn delete_issuer_with_assets_is_rejected() {
             ..
         })
     ));
+    guard.cleanup().await;
 }

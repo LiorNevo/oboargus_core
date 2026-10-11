@@ -12,8 +12,34 @@ pub mod decimal;
 /// The high-level financial domain model (see `specs/015-database-uml-domains/spec.md`).
 pub mod domain;
 
+// Test-only shared fixture. Each per-entity unit test file under
+// `src/domain/<x>/tests.rs` includes this module locally via
+// `#[path = "..."] mod common;`, which is the standard cargo pattern
+// for sharing test code across files in a single crate. Each
+// `#[path = "..."]` inclusion is treated by rustc as a separate
+// module declaration, and `clippy::duplicate_mod` flags that as
+// duplication. We allow the lint here because the duplication is
+// deliberate: each test file is its own compilation unit, and the
+// fixture's runtime cost is negligible.
+//
+// The module is `pub` so that external integration tests under
+// `tests/` can reach it via `obolargus_core::common::*`. The body
+// is gated by `#[cfg(test)]` so it is not compiled into the release
+// build.
+#[allow(clippy::duplicate_mod)]
+pub mod common;
+
 /// The crate version, taken from `Cargo.toml` at compile time.
 ///
 /// Kept as a stable constant so generated documentation and health checks
 /// report the exact runtime version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// No re-export needed: each test target (lib test + each integration
+// test binary under `tests/`) sees the `common` module via its own
+// `#[path = "..."] mod common;` inclusion. The per-entity unit
+// tests under `src/domain/<x>/tests.rs` and the integration test
+// `tests/seed.rs` each declare `mod common;` locally, which is the
+// standard cargo pattern. We accept the `clippy::duplicate_mod`
+// warning at the `pub mod common;` declaration below because the
+// duplication is by design.

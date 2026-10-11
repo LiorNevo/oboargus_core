@@ -1,5 +1,6 @@
 //! Tests for US4 — Event create + read; immutability.
 
+use crate::common::*;
 use crate::domain::asset::create_asset;
 use crate::domain::asset::entity::NewAsset;
 use crate::domain::event::create_event;
@@ -9,16 +10,6 @@ use crate::domain::portfolio::create_portfolio;
 use crate::domain::portfolio::entity::NewPortfolio;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
-
-async fn pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL").ok()?;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations should succeed");
-    Some(pool)
-}
 
 async fn setup(pool: &PgPool) -> (crate::domain::id::PortfolioId, crate::domain::id::AssetId) {
     let p = create_portfolio(
@@ -49,7 +40,7 @@ async fn setup(pool: &PgPool) -> (crate::domain::id::PortfolioId, crate::domain:
 
 #[tokio::test]
 async fn create_buy_event_persists() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let (p, a) = setup(&pool).await;
@@ -68,11 +59,12 @@ async fn create_buy_event_persists() {
     .await
     .expect("create");
     assert_eq!(ev.event_type, "buy");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn create_sell_event_persists() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let (p, a) = setup(&pool).await;
@@ -91,11 +83,12 @@ async fn create_sell_event_persists() {
     .await
     .expect("create");
     assert_eq!(ev.event_type, "sell");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn create_transfer_event_persists_with_to_portfolio() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let (p, a) = setup(&pool).await;
@@ -125,11 +118,12 @@ async fn create_transfer_event_persists_with_to_portfolio() {
     .await
     .expect("create");
     assert_eq!(ev.to_portfolio_id, Some(other.id));
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn create_transfer_event_without_to_portfolio_is_rejected() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let (p, a) = setup(&pool).await;
@@ -147,11 +141,12 @@ async fn create_transfer_event_without_to_portfolio_is_rejected() {
     )
     .await;
     assert!(res.is_err());
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn create_zero_quantity_event_is_rejected() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let (p, a) = setup(&pool).await;
@@ -169,6 +164,7 @@ async fn create_zero_quantity_event_is_rejected() {
     )
     .await;
     assert!(res.is_err());
+    guard.cleanup().await;
 }
 
 #[tokio::test]

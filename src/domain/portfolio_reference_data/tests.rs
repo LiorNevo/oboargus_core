@@ -1,6 +1,7 @@
 //! Tests for US3 — PortfolioReferenceData dual-temporal semantics.
 //! Gated by `DATABASE_URL`.
 
+use crate::common::*;
 use crate::domain::portfolio::create_portfolio;
 use crate::domain::portfolio::entity::NewPortfolio;
 use crate::domain::portfolio_reference_data::entity::NewPortfolioReferenceData;
@@ -10,16 +11,6 @@ use crate::domain::portfolio_reference_data::{
 };
 use chrono::Utc;
 use sqlx::PgPool;
-
-async fn pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL").ok()?;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations should succeed");
-    Some(pool)
-}
 
 async fn new_portfolio(pool: &PgPool) -> crate::domain::id::PortfolioId {
     let p = create_portfolio(
@@ -38,7 +29,7 @@ async fn new_portfolio(pool: &PgPool) -> crate::domain::id::PortfolioId {
 
 #[tokio::test]
 async fn create_portfolio_reference_data_persists_record() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let portfolio_id = new_portfolio(&pool).await;
@@ -57,11 +48,12 @@ async fn create_portfolio_reference_data_persists_record() {
     .await
     .expect("create");
     assert_eq!(rec.value, "SPY");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn get_current_portfolio_reference_data_returns_latest_knowledge() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let portfolio_id = new_portfolio(&pool).await;
@@ -99,11 +91,12 @@ async fn get_current_portfolio_reference_data_returns_latest_knowledge() {
         .expect("current")
         .expect("present");
     assert_eq!(current.value, "b");
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn get_portfolio_reference_data_history_returns_all_records_ordered() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let portfolio_id = new_portfolio(&pool).await;
@@ -141,11 +134,12 @@ async fn get_portfolio_reference_data_history_returns_all_records_ordered() {
         .expect("history");
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].knowledge_date, k2);
+    guard.cleanup().await;
 }
 
 #[tokio::test]
 async fn update_portfolio_reference_value_writes_new_record() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let portfolio_id = new_portfolio(&pool).await;
@@ -173,4 +167,5 @@ async fn update_portfolio_reference_value_writes_new_record() {
         .expect("current")
         .expect("present");
     assert_eq!(current.value, "new");
+    guard.cleanup().await;
 }

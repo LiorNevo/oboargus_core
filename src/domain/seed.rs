@@ -49,6 +49,14 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
         let _ = crate::domain::asset::read::list_assets(pool, AssetFilter::default())
             .await
             .map(|a| summary.assets_created = a.len());
+        // Count portfolios directly from the database (the
+        // `portfolio::read` module does not currently expose a
+        // list-all helper).
+        let portfolio_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM portfolios")
+            .fetch_one(pool)
+            .await
+            .map_err(DomainError::Infrastructure)?;
+        summary.portfolios_created = portfolio_count as usize;
         return Ok(summary);
     }
 

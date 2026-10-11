@@ -1,5 +1,6 @@
 //! Tests for US4 — Position replay and read integration.
 
+use crate::common::*;
 use crate::domain::asset::create_asset;
 use crate::domain::asset::entity::NewAsset;
 use crate::domain::event::create_event;
@@ -9,21 +10,10 @@ use crate::domain::portfolio::create_portfolio;
 use crate::domain::portfolio::entity::NewPortfolio;
 use crate::domain::position::get_position;
 use rust_decimal::Decimal;
-use sqlx::PgPool;
-
-async fn pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL").ok()?;
-    let pool = PgPool::connect(&url).await.expect("connect");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations should succeed");
-    Some(pool)
-}
 
 #[tokio::test]
 async fn get_position_returns_materialized_position_after_event() {
-    let Some(pool) = pool().await else {
+    let Some((pool, guard)) = tx_pool().await else {
         return;
     };
     let p = create_portfolio(
@@ -67,6 +57,7 @@ async fn get_position_returns_materialized_position_after_event() {
         .await
         .expect("get position");
     assert_eq!(pos.quantity, Decimal::from(100));
+    guard.cleanup().await;
 }
 
 #[tokio::test]
