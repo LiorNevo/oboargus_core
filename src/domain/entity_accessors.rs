@@ -47,6 +47,7 @@ mod tests {
             issuer_type: "t".into(),
             legal_jurisdiction: "US".into(),
             created_at: Utc::now(),
+            parent_id: None,
         };
         assert_eq!(issuer.id(), issuer_id);
     }

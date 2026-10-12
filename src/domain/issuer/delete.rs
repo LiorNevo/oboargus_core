@@ -3,9 +3,20 @@ use sqlx::PgPool;
 
 use crate::domain::error::DomainError;
 use crate::domain::id::IssuerId;
+use crate::domain::issuer::read::list_children_issuers;
 
 /// Implements FR-019 of spec 016-implement-domain-model.
 pub async fn delete_issuer(pool: &PgPool, id: IssuerId) -> Result<(), DomainError> {
+    // Reject if the issuer has child issuers (must retire children first)
+    let children = list_children_issuers(pool, id).await?;
+    if !children.is_empty() {
+        return Err(DomainError::cannot_delete(
+            "Issuer",
+            id,
+            format!("issuer has {} children, retire them first", children.len()),
+        ));
+    }
+
     let (asset_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM assets WHERE issuer_id = $1")
         .bind(id.as_uuid())
         .fetch_one(pool)

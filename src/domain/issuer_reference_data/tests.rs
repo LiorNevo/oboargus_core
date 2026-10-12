@@ -19,6 +19,7 @@ async fn new_issuer(pool: &PgPool) -> crate::domain::id::IssuerId {
             name: "For Ref".into(),
             issuer_type: "test".into(),
             legal_jurisdiction: "US".into(),
+            parent_id: None,
         },
     )
     .await

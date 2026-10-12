@@ -66,13 +66,13 @@ fn reference_data_entities_have_seven_fields_each() {
 }
 
 #[test]
-fn eleven_relationships() {
+fn twelve_relationships() {
     let desc = model_description();
-    assert_eq!(desc.relationships.len(), 11);
+    assert_eq!(desc.relationships.len(), 12); // 11 original + issuer parent_of
 }
 
 #[test]
-fn eleven_invariants() {
+fn twelve_invariants() {
     let desc = model_description();
-    assert_eq!(desc.invariants.len(), 11);
+    assert_eq!(desc.invariants.len(), 12); // 11 original + issuer DAG acyclicity
 }

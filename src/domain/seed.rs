@@ -42,7 +42,7 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
 
     // Idempotency check: if the canonical issuer already exists, do nothing.
     let existing = crate::domain::issuer::read::list_issuers(pool).await?;
-    if existing.iter().any(|i| i.name == "Vanguard Group") {
+    if existing.iter().any(|i| i.name == "Alphabet Inc.") {
         // Re-seed idempotently: report the existing counts so callers can
         // see what is in the database. We do not re-insert anything.
         summary.issuers_created = existing.len();
@@ -60,23 +60,25 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
         return Ok(summary);
     }
 
-    // Issuers
-    let vanguard = issuer_create::create_issuer(
+    // Issuers: a 2-issuer DAG — Alphabet Inc. (root) → Google LLC (child)
+    let alphabet = issuer_create::create_issuer(
         pool,
         NewIssuer {
-            name: "Vanguard Group".to_string(),
-            issuer_type: "asset_manager".to_string(),
+            name: "Alphabet Inc.".to_string(),
+            issuer_type: "corporation".to_string(),
             legal_jurisdiction: "US".to_string(),
+            parent_id: None,
         },
     )
     .await?;
     summary.issuers_created += 1;
-    let apple = issuer_create::create_issuer(
+    let google = issuer_create::create_issuer(
         pool,
         NewIssuer {
-            name: "Apple Inc.".to_string(),
-            issuer_type: "corporation".to_string(),
+            name: "Google LLC".to_string(),
+            issuer_type: "subsidiary".to_string(),
             legal_jurisdiction: "US".to_string(),
+            parent_id: Some(alphabet.id()),
         },
     )
     .await?;
@@ -90,7 +92,7 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
             display_name: "Vanguard Total Stock Market ETF".to_string(),
             currency: "USD".to_string(),
             backed_by_portfolio_id: None,
-            issuer_id: Some(vanguard.id()),
+            issuer_id: Some(google.id()),
         },
     )
     .await?;
@@ -102,7 +104,7 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
             display_name: "Apple Inc.".to_string(),
             currency: "USD".to_string(),
             backed_by_portfolio_id: None,
-            issuer_id: Some(apple.id()),
+            issuer_id: Some(google.id()),
         },
     )
     .await?;

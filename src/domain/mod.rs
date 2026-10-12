@@ -1,8 +1,9 @@
 //! High-level financial domain model.
 //!
-//! Implements the 8 entities, 11 relationships, and 11 invariants defined
-//! in `specs/015-database-uml-domains/spec.md`. See the spec for the model
-//! and `specs/016-implement-domain-model/spec.md` for the implementation
+//! Implements the 8 entities, 12 relationships, and 12 invariants defined
+//! in `specs/015-database-uml-domains/spec.md` (the 12th relationship and
+//! 12th invariant are the issuer DAG added in US2b). See the spec for the
+//! model and `specs/016-implement-domain-model/spec.md` for the implementation
 //! contract.
 //!
 //! Module organization: one submodule per high-level entity, plus shared

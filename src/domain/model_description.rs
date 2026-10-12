@@ -280,6 +280,12 @@ pub fn model_description() -> ModelDescription {
                         type_domain: "timestamp",
                         aggregates: &["none"],
                     },
+                    // US2b: parent_id for the issuer DAG
+                    FieldDescription {
+                        name: "parent_id",
+                        type_domain: "uuid",
+                        aggregates: &["none"],
+                    },
                 ],
             },
             EntityDescription {
@@ -441,6 +447,14 @@ pub fn model_description() -> ModelDescription {
                 cardinality_from: "0..*",
                 cardinality_to: "0..*",
             },
+            // US2b: issuer DAG
+            RelationshipDescription {
+                from: "Issuer",
+                to: "Issuer",
+                label: "parent_of",
+                cardinality_from: "0..*",
+                cardinality_to: "0..1",
+            },
         ],
         invariants: vec![
             "Portfolio graph is a DAG.",
@@ -454,6 +468,8 @@ pub fn model_description() -> ModelDescription {
             "`last` is time-coordinated.",
             "Numeric-only constraint: no sum/avg on non-numeric fields.",
             "Identity fields are none.",
+            // US2b: issuer DAG acyclicity (Invariant 12 from predecessor spec)
+            "Issuer graph is a DAG.",
         ],
     }
 }

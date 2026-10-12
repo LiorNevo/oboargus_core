@@ -1,16 +1,17 @@
 //! Invariants registry. Implements US5 / FR-008.
 //!
-//! Each test in this file is a thin wrapper that documents one of the 11
-//! invariants from the predecessor spec. The actual assertions live in the
-//! per-user-story test files (portfolio/tests, asset/tests, etc.); this
-//! file is the registry that lists them all in one place, so a reviewer can
-//! confirm "every invariant is tested" by reading this file alone.
+//! Each test in this file is a thin wrapper that documents one of the 12
+//! invariants from the predecessor spec (11 original + issuer DAG acyclicity
+//! added in US2b). The actual assertions live in the per-user-story test
+//! files (portfolio/tests, asset/tests, etc.); this file is the registry that
+//! lists them all in one place, so a reviewer can confirm "every invariant is
+//! tested" by reading this file alone.
 //!
 //! ## Mutation testing workflow
 //!
 //! To verify that each invariant test actually catches a violation, a
 //! reviewer can introduce a temporary bug in the implementation and confirm
-//! that the relevant test fails. The 11 mutations to try, one per invariant:
+//! that the relevant test fails. The 12 mutations to try, one per invariant:
 //!
 //! 1. **portfolio_dag_acyclicity** — in `portfolio::dag::detect_cycle`, change
 //!    the query to always return `None`. The cycle test fails.
@@ -36,6 +37,8 @@
 //!     The model_description test fails.
 //! 11. **identity_fields_are_none** — declare `sum` on `Asset.id`. The
 //!     model_description test fails.
+//! 12. **issuer_dag_acyclicity** — in `issuer::dag::detect_cycle`, change the
+//!     query to always return `None`. The cycle test fails.
 
 #![allow(unused_imports)]
 
@@ -177,4 +180,19 @@ fn invariant_11_identity_fields_are_none() {
             }
         }
     }
+}
+
+/// US2b: Invariant 12 — issuer graph is a DAG.
+/// Tested in `issuer::tests::create_issuer_with_self_parent_is_rejected`,
+/// `issuer::tests::create_issuer_cycle_is_rejected`,
+/// `issuer::tests::reparent_issuer_cycle_is_rejected`.
+#[test]
+fn invariant_12_issuer_dag_acyclicity() {
+    let desc = model_description();
+    assert!(
+        desc.invariants
+            .iter()
+            .any(|i| i.contains("Issuer graph is a DAG")),
+        "issuer DAG acyclicity invariant not found in model description"
+    );
 }
