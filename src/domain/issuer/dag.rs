@@ -23,9 +23,22 @@ pub fn is_self_parent(child_id: IssuerId, parent_id: IssuerId) -> bool {
 /// Check whether linking `candidate_child_id` as a child of
 /// `candidate_parent_id` would create a cycle in the issuer graph.
 ///
-/// Uses a recursive CTE to walk up from `candidate_child_id`'s ancestors
-/// and checks whether `candidate_parent_id` is already reachable. If so,
-/// the link would close a cycle and is rejected.
+/// This walks UP from `candidate_child_id`'s current parent chain and
+/// checks whether `candidate_parent_id` is already reachable as an
+/// ancestor. If so, the link would close a cycle.
+///
+/// Used by both `create_issuer` and `reparent_issuer`:
+/// - `create_issuer(new_id, Some(parent_id))`: `candidate_child_id = new_id`
+///   (which doesn't exist yet, so the walk yields no rows → always `Ok`)
+///   and `candidate_parent_id = parent_id`. The self-loop guard
+///   (`is_self_parent`) is the only real check for creation.
+/// - `reparent_issuer(id, Some(new_parent))`: we need to check whether
+///   `id` is an ancestor of `new_parent` (because the reparent sets
+///   `id.parent = new_parent`, and if `id` is already an ancestor of
+///   `new_parent` the new edge `new_parent → id` closes the loop).
+///   Call as `detect_cycle(candidate_child = new_parent,
+///   candidate_parent = id)` so the walk starts at `new_parent` and
+///   looks for `id` in its ancestor chain.
 ///
 /// Returns `Ok(())` if the link is safe; `Err(DomainError)` if it would
 /// create a cycle.
@@ -37,7 +50,7 @@ pub async fn detect_cycle(
 ) -> Result<(), DomainError> {
     // Recursive CTE: start from candidate_child_id and walk up parent links.
     // If we ever reach candidate_parent_id, a cycle would result.
-    let found: Option<(i64,)> = sqlx::query_as(
+    let found: Option<(i32,)> = sqlx::query_as(
         r#"
         WITH RECURSIVE ancestors AS (
             -- Base case: start from candidate_child's current parent

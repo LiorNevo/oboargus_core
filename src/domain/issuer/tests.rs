@@ -212,8 +212,17 @@ async fn create_issuer_with_self_parent_is_rejected() {
 }
 
 /// T134: given a chain P → C1 → C2, attempting to set C2's parent to P
-/// (creating a cycle) must be rejected with
-/// `DomainError::InvariantViolation { invariant: "issuer_dag_acyclicity", .. }`.
+/// Reparenting a node to a new parent that is one of its **current**
+/// ancestors is a cycle (the new edge `new_parent → id` closes the
+/// loop `id → ... → new_parent → id`). Reparenting to a non-ancestor
+/// (even one that shares a common ancestor) is a valid tree operation
+/// and must NOT be rejected.
+///
+/// This test exercises the **non-cycle** case: reparenting `C2` from
+/// `C1` to `P` (where `P → C1 → C2` is the current chain) is valid —
+/// the resulting tree is `P → {C1, C2}` with no cycle. The
+/// `reparent_issuer_cycle_is_rejected` test below exercises the
+/// actual cycle case (`A → B`, reparent `A` under `B`).
 #[tokio::test]
 async fn create_issuer_cycle_is_rejected() {
     let Some((pool, guard)) = tx_pool().await else {
@@ -256,16 +265,15 @@ async fn create_issuer_cycle_is_rejected() {
     .await
     .expect("create C2");
 
-    // Try to make C2 a child of P — would close a cycle (P→C1→C2→P)
-    let result = reparent_issuer(&pool, c2.id(), Some(p.id())).await;
-    let err = result.expect_err("cycle reparent should fail");
-    assert!(matches!(
-        err,
-        DomainError::InvariantViolation {
-            invariant: "issuer_dag_acyclicity",
-            ..
-        }
-    ));
+    // Reparent C2 from C1 to P. The current chain is C2 → C1 → P;
+    // after the reparent C2 → P, the tree rooted at P is {P, C1, C2}
+    // with edges P→C1 and P→C2. This is a valid tree, NOT a cycle
+    // (no path from C2 back to itself). The operation must succeed.
+    let result = reparent_issuer(&pool, c2.id(), Some(p.id()))
+        .await
+        .expect("reparent C2 under P is a valid tree operation, not a cycle");
+    assert_eq!(result.parent_id, Some(p.id().0));
+
     guard.cleanup().await;
 }
 
@@ -450,10 +458,13 @@ async fn reparent_issuer_cycle_is_rejected() {
     .await
     .expect("create B");
 
-    // Try to make B's parent be A's parent (which is null) → no cycle
-    let r1 = reparent_issuer(&pool, b.id(), Some(a.id())).await;
-    // Should fail because a.id is already b's parent (same as existing)
-    assert!(r1.is_err()); // already parent — this is fine
+    // Try to make B's parent be A (B is already a child of A). This is
+    // a no-op reparent (idempotent) — not a cycle. The production code
+    // accepts it; we verify the new parent_id is still A.
+    let r1 = reparent_issuer(&pool, b.id(), Some(a.id()))
+        .await
+        .expect("reparent B under A (B is already A's child) is a no-op, not an error");
+    assert_eq!(r1.parent_id, Some(a.id().0));
 
     // Actually try the opposite direction: make A a child of B → cycle A→B→A
     let result = reparent_issuer(&pool, a.id(), Some(b.id())).await;

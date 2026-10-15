@@ -48,8 +48,9 @@ pub async fn list_children_issuers(
 /// to the root (bottom-up order).
 ///
 /// Uses a recursive CTE to walk up the `parent_id` chain. Returns an empty
-/// `Vec` for a root issuer.
-/// Implements FR-002 of spec 016-implement-domain-model.
+/// `Vec` for a root issuer (the starting node `id` itself is NOT included
+/// in the result — only its ancestors). Implements FR-002 of
+/// spec 016-implement-domain-model.
 pub async fn list_ancestor_issuers(
     pool: &PgPool,
     id: IssuerId,
@@ -57,10 +58,13 @@ pub async fn list_ancestor_issuers(
     let rows: Vec<Issuer> = sqlx::query_as(
         r#"
         WITH RECURSIVE ancestors AS (
-            -- Start from the immediate parent of id
+            -- Start from the immediate parent of id. We do NOT include `id`
+            -- itself in the result — only its ancestors. For a root issuer
+            -- (no parent), this base case selects no rows, and the result
+            -- is an empty Vec as the spec requires.
             SELECT id, name, issuer_type, legal_jurisdiction, created_at, parent_id, 1 AS depth
             FROM issuers
-            WHERE id = $1
+            WHERE id = (SELECT parent_id FROM issuers WHERE id = $1)
 
             UNION ALL
 

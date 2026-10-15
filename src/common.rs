@@ -1,10 +1,21 @@
 //! Shared test fixture for the `obolargus-core` integration tests.
 //!
-//! `tx_pool()` returns a `&PgPool`. The fixture runs `TRUNCATE … CASCADE`
-//! on every high-level table *before* yielding the pool, so every test
-//! starts with an empty database. The fixture's `cleanup()` method
-//! performs the same `TRUNCATE` and is intended to be called at the
-//! end of each test (or via `PoolGuard::drop`).
+//! `tx_pool()` returns a `&PgPool` and a `PoolGuard`. The fixture
+//! runs `TRUNCATE … CASCADE` on every high-level table *before*
+//! yielding the pool, so every test starts with an empty database.
+//! The `PoolGuard::Drop` impl also runs `TRUNCATE … CASCADE` to
+//! keep the test database tidy.
+//!
+//! **Serial execution required.** These integration tests share a
+//! single PostgreSQL test database (named by `TEST_DATABASE_URL`)
+//! and truncate its tables in-place. Running them in parallel
+//! causes one test's `TRUNCATE` to wipe another test's in-flight
+//! fixture data, producing `23503` foreign-key violations. The
+//! test suite is forced to run serially via
+//! `RUST_TEST_THREADS=1` in `.cargo/config.toml` at the crate root.
+//! A follow-up refactor (T081 follow-up) could move the per-test
+//! isolation to a per-test `Transaction` (correct + parallel); the
+//! current serial approach is the smallest correct change.
 //!
 //! The fixture connects to the **test** database (named by
 //! `TEST_DATABASE_URL`), NEVER the production database. The

@@ -18,7 +18,9 @@ use crate::domain::issuer::read;
 ///
 /// Rejects the operation with `InvariantViolation` if:
 ///   - `new_parent_id == id` (self-loop), or
-///   - `new_parent_id` is already a descendant of `id` (would close a cycle).
+///   - `id` is an ancestor of `new_parent_id` (reparenting would close a
+///     cycle: the existing path `id → ... → new_parent` plus the new edge
+///     `new_parent → id` forms a closed loop).
 ///
 /// Implements FR-002 of spec 016-implement-domain-model.
 pub async fn reparent_issuer(
@@ -34,8 +36,16 @@ pub async fn reparent_issuer(
                 format!("issuer {} cannot be its own parent", id),
             ));
         }
-        // Cycle guard: check whether new_parent is already a descendant of id
-        dag::detect_cycle(pool, id, parent).await?;
+        // Cycle guard. The reparent sets `id.parent = new_parent`. A cycle
+        // exists iff `id` is an ancestor of `new_parent` (i.e., there's a
+        // path `id → ... → new_parent` that, combined with the new edge
+        // `new_parent → id`, forms a closed loop). Walk UP from
+        // `new_parent` and check whether `id` is in the ancestor chain.
+        // `detect_cycle(candidate_child, candidate_parent)` walks up from
+        // `candidate_child` and looks for `candidate_parent` as an
+        // ancestor; passing `(new_parent, id)` makes it walk up from the
+        // new parent and look for the node being reparented.
+        dag::detect_cycle(pool, parent, id).await?;
     }
 
     let res = sqlx::query("UPDATE issuers SET parent_id = $1 WHERE id = $2")
