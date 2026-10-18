@@ -41,20 +41,37 @@ const TABLES: &[&str] = &[
     "portfolios",
 ];
 
-/// Resolve the database URL for tests. Prefers `TEST_DATABASE_URL`;
-/// falls back to `DATABASE_URL` only if the test-specific variable
-/// is unset (so existing CI scripts that only set `DATABASE_URL`
-/// continue to work).
-fn resolve_test_url() -> Option<String> {
-    std::env::var("TEST_DATABASE_URL")
-        .ok()
-        .or_else(|| std::env::var("DATABASE_URL").ok())
+/// Pick the test database URL from the two candidates, preferring
+/// `test_url` (the value of `TEST_DATABASE_URL`) and falling back to
+/// `prod_url` (the value of `DATABASE_URL`).
+///
+/// This is a pure helper: the env-var reads live in [`tx_pool`], so
+/// tests can exercise every branch (preference, fallback, neither set)
+/// without manipulating process-wide environment state.
+pub fn resolve_url(test_url: Option<String>, prod_url: Option<String>) -> Option<String> {
+    test_url.or(prod_url)
 }
 
 /// Open the migrations, truncate every high-level table, return a
 /// `&PgPool` for the test to use.
 pub async fn tx_pool() -> Option<(PgPool, PoolGuard)> {
-    let url = resolve_test_url()?;
+    tx_pool_from(
+        std::env::var("TEST_DATABASE_URL").ok(),
+        std::env::var("DATABASE_URL").ok(),
+    )
+    .await
+}
+
+/// Parameterized variant of [`tx_pool`]. The two `Option<String>`
+/// arguments are the values that [`tx_pool`] would read from
+/// `TEST_DATABASE_URL` and `DATABASE_URL` respectively. Tests use
+/// this to exercise the `None` and fallback paths without touching
+/// the process environment.
+pub async fn tx_pool_from(
+    test_url: Option<String>,
+    prod_url: Option<String>,
+) -> Option<(PgPool, PoolGuard)> {
+    let url = resolve_url(test_url, prod_url)?;
     let pool = PgPool::connect(&url).await.expect("connect");
     sqlx::migrate!("./migrations")
         .run(&pool)
