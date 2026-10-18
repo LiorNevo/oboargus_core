@@ -189,4 +189,89 @@ mod tests {
         // is the safety net.
         let _ = discriminant(&v);
     }
+
+    // ---------- constructor coverage ----------
+    //
+    // The five constructors below were previously uncovered by the
+    // existing test suite. The tests pin the constructor output
+    // (including the `Display` arm selected by the `field: Option`
+    // discriminant) so a future refactor that changes the error
+    // message has to update the test too.
+
+    #[test]
+    fn not_found_constructor_produces_not_found_variant() {
+        let e = DomainError::not_found("Asset", "abc-123");
+        match &e {
+            DomainError::NotFound { entity, id } => {
+                assert_eq!(*entity, "Asset");
+                assert_eq!(id, "abc-123");
+            }
+            other => panic!("expected NotFound, got {:?}", other),
+        }
+        // The Display impl must surface both the entity and the id.
+        assert!(e.to_string().contains("Asset"));
+        assert!(e.to_string().contains("abc-123"));
+    }
+
+    #[test]
+    fn invariant_constructor_produces_invariant_violation_variant() {
+        let e = DomainError::invariant("dag_acyclic", "would introduce a cycle");
+        match e {
+            DomainError::InvariantViolation { invariant, detail } => {
+                assert_eq!(invariant, "dag_acyclic");
+                assert_eq!(detail, "would introduce a cycle");
+            }
+            other => panic!("expected InvariantViolation, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn immutable_field_constructor_produces_favorable_field_message() {
+        let e = DomainError::immutable_field("Portfolio", "id");
+        match e {
+            DomainError::Immutable { entity, field } => {
+                assert_eq!(entity, "Portfolio");
+                assert_eq!(field, Some("id"));
+            }
+            other => panic!("expected Immutable, got {:?}", other),
+        }
+        // The Display arm for `field: Some(_)` includes the field name.
+        assert!(e.to_string().contains("id"));
+        assert!(e.to_string().contains("Portfolio"));
+    }
+
+    #[test]
+    fn immutable_record_constructor_produces_record_level_message() {
+        let e = DomainError::immutable_record("Asset");
+        match e {
+            DomainError::Immutable { entity, field } => {
+                assert_eq!(entity, "Asset");
+                assert_eq!(field, None);
+            }
+            other => panic!("expected Immutable, got {:?}", other),
+        }
+        // The Display arm for `field: None` falls back to `<record>`.
+        assert!(e.to_string().contains("<record>"));
+    }
+
+    #[test]
+    fn cannot_delete_constructor_produces_cannot_delete_variant() {
+        let e = DomainError::cannot_delete("Portfolio", "p-1", "3 children");
+        match e {
+            DomainError::CannotDelete { entity, id, reason } => {
+                assert_eq!(entity, "Portfolio");
+                assert_eq!(id, "p-1");
+                assert_eq!(reason, "3 children");
+            }
+            other => panic!("expected CannotDelete, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn unsupported_event_type_display_includes_name() {
+        let e = DomainError::UnsupportedEventType {
+            event_type: "dividend".to_string(),
+        };
+        assert!(e.to_string().contains("dividend"));
+    }
 }

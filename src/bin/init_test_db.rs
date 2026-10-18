@@ -4,7 +4,7 @@
 //! Usage:
 //!     cargo run -p obolargus-core --bin init_test_db
 
-use sqlx::Connection;
+use obolargus_core::bin_helpers::{ensure_test_database, validate_test_db_name};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,26 +16,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let test_db =
         std::env::var("POSTGRES_TEST_DB").unwrap_or_else(|_| "obolargus_test_db".to_string());
 
-    let admin_url = format!("postgres://{user}:{pass}@{host}:{port}/postgres");
-    let mut conn = sqlx::PgConnection::connect(&admin_url).await?;
+    // Reject unsafe names *before* opening a connection so we never
+    // even talk to postgres with a potentially-injected identifier.
+    validate_test_db_name(&test_db).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
-            .bind(&test_db)
-            .fetch_one(&mut conn)
-            .await?;
-    if exists {
-        println!("init_test_db: {} already exists; nothing to do.", test_db);
-    } else {
-        if !test_db
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            return Err("POSTGRES_TEST_DB contains unsafe characters".into());
-        }
-        let sql = format!("CREATE DATABASE {}", test_db);
-        sqlx::query(&sql).execute(&mut conn).await?;
+    let admin_url = format!("postgres://{user}:{pass}@{host}:{port}/postgres");
+    let created = ensure_test_database(&admin_url, &test_db).await?;
+    if created {
         println!("init_test_db: created {}.", test_db);
+    } else {
+        println!("init_test_db: {} already exists; nothing to do.", test_db);
     }
     Ok(())
 }

@@ -169,3 +169,23 @@ async fn update_portfolio_reference_value_writes_new_record() {
     assert_eq!(current.value, "new");
     guard.cleanup().await;
 }
+
+#[test]
+fn entity_accessors_return_wrapped_id_types() {
+    use crate::domain::id::DomainId;
+    use crate::domain::portfolio_reference_data::entity::PortfolioReferenceData;
+    let id = uuid::Uuid::new_v4();
+    let portfolio_id = uuid::Uuid::new_v4();
+    let today = Utc::now().date_naive();
+    let row = PortfolioReferenceData {
+        id,
+        portfolio_id,
+        fact_type: "nav".into(),
+        as_of_date: today,
+        knowledge_date: today,
+        value: "v".into(),
+        source: "s".into(),
+    };
+    assert_eq!(row.id().as_uuid(), id);
+    assert_eq!(row.portfolio_id().as_uuid(), portfolio_id);
+}

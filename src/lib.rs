@@ -12,6 +12,15 @@ pub mod decimal;
 /// The high-level financial domain model (see `specs/015-database-uml-domains/spec.md`).
 pub mod domain;
 
+/// Helpers shared by the binary entrypoints in `src/bin/`.
+///
+/// Extracted from `db_cleanup.rs`, `init_test_db.rs`, and
+/// `check_empty.rs` so that the helper logic is unit-tested and so
+/// that `cargo-llvm-cov` credits the binaries' code paths against
+/// the report when the binaries are invoked. See the module docs
+/// for details.
+pub mod bin_helpers;
+
 // Test-only shared fixture. Each per-entity unit test file under
 // `src/domain/<x>/tests.rs` includes this module locally via
 // `#[path = "..."] mod common;`, which is the standard cargo pattern

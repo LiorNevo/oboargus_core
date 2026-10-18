@@ -178,3 +178,23 @@ async fn update_asset_reference_value_writes_new_record() {
     assert_eq!(current.value, "new");
     guard.cleanup().await;
 }
+
+#[test]
+fn entity_accessors_return_wrapped_id_types() {
+    use crate::domain::asset_reference_data::entity::AssetReferenceData;
+    use crate::domain::id::DomainId;
+    let id = uuid::Uuid::new_v4();
+    let asset_id = uuid::Uuid::new_v4();
+    let today = Utc::now().date_naive();
+    let row = AssetReferenceData {
+        id,
+        asset_id,
+        fact_type: "price".into(),
+        as_of_date: today,
+        knowledge_date: today,
+        value: "v".into(),
+        source: "s".into(),
+    };
+    assert_eq!(row.id().as_uuid(), id);
+    assert_eq!(row.asset_id().as_uuid(), asset_id);
+}

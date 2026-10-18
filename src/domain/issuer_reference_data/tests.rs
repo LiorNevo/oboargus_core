@@ -171,3 +171,23 @@ async fn update_issuer_reference_value_writes_new_record() {
     assert_eq!(current.value, "new");
     guard.cleanup().await;
 }
+
+#[test]
+fn entity_accessors_return_wrapped_id_types() {
+    use crate::domain::id::DomainId;
+    use crate::domain::issuer_reference_data::entity::IssuerReferenceData;
+    let id = uuid::Uuid::new_v4();
+    let issuer_id = uuid::Uuid::new_v4();
+    let today = Utc::now().date_naive();
+    let row = IssuerReferenceData {
+        id,
+        issuer_id,
+        fact_type: "rating".into(),
+        as_of_date: today,
+        knowledge_date: today,
+        value: "v".into(),
+        source: "s".into(),
+    };
+    assert_eq!(row.id().as_uuid(), id);
+    assert_eq!(row.issuer_id().as_uuid(), issuer_id);
+}

@@ -8,10 +8,12 @@
 //! Gated by `DATABASE_URL`: when unset, tests exit early as no-ops.
 
 use crate::domain::error::DomainError;
+use crate::domain::id::DomainId;
 use crate::domain::model_description::model_description;
 use crate::domain::portfolio::entity::{NewPortfolio, PortfolioPatch};
 use crate::domain::portfolio::{
-    create_portfolio, delete_portfolio, get_portfolio, list_children, update_portfolio,
+    create_portfolio, delete_portfolio, get_portfolio, list_ancestors, list_children,
+    update_portfolio,
 };
 
 use crate::common::*;
@@ -215,4 +217,61 @@ async fn model_description_includes_portfolio() {
         .expect("Portfolio");
     assert_eq!(p.fields.len(), 6);
     assert!(desc.relationships.iter().any(|r| r.label == "composes"));
+}
+
+#[tokio::test]
+async fn list_ancestors_returns_root_to_leaf_chain() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    // Build a 3-deep chain: root → mid → leaf.
+    let root = create_portfolio(
+        &pool,
+        NewPortfolio {
+            name: "root".into(),
+            purpose: "r".into(),
+            created_by: "t".into(),
+            parent_id: None,
+        },
+    )
+    .await
+    .expect("root");
+    let mid = create_portfolio(
+        &pool,
+        NewPortfolio {
+            name: "mid".into(),
+            purpose: "m".into(),
+            created_by: "t".into(),
+            parent_id: Some(root.id()),
+        },
+    )
+    .await
+    .expect("mid");
+    let leaf = create_portfolio(
+        &pool,
+        NewPortfolio {
+            name: "leaf".into(),
+            purpose: "l".into(),
+            created_by: "t".into(),
+            parent_id: Some(mid.id()),
+        },
+    )
+    .await
+    .expect("leaf");
+
+    // From `leaf`: ancestors must be [root, mid] in root-to-leaf order.
+    let chain = list_ancestors(&pool, leaf.id()).await.expect("ancestors");
+    assert_eq!(
+        chain.iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![root.id().as_uuid(), mid.id().as_uuid()],
+        "ancestors must be returned root-to-leaf, excluding the leaf itself"
+    );
+
+    // From `root`: no ancestors.
+    let none = list_ancestors(&pool, root.id())
+        .await
+        .expect("no ancestors");
+    assert!(none.is_empty(), "root has no ancestors");
+
+    guard.cleanup().await;
 }
