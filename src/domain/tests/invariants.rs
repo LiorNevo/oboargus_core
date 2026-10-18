@@ -1,17 +1,18 @@
 //! Invariants registry. Implements US5 / FR-008.
 //!
-//! Each test in this file is a thin wrapper that documents one of the 12
+//! Each test in this file is a thin wrapper that documents one of the 13
 //! invariants from the predecessor spec (11 original + issuer DAG acyclicity
-//! added in US2b). The actual assertions live in the per-user-story test
-//! files (portfolio/tests, asset/tests, etc.); this file is the registry that
-//! lists them all in one place, so a reviewer can confirm "every invariant is
-//! tested" by reading this file alone.
+//! added in US2b + external-identifier uniqueness added in US8). The actual
+//! assertions live in the per-user-story test files (portfolio/tests,
+//! asset/tests, etc.); this file is the registry that lists them all in one
+//! place, so a reviewer can confirm "every invariant is tested" by reading
+//! this file alone.
 //!
 //! ## Mutation testing workflow
 //!
 //! To verify that each invariant test actually catches a violation, a
 //! reviewer can introduce a temporary bug in the implementation and confirm
-//! that the relevant test fails. The 12 mutations to try, one per invariant:
+//! that the relevant test fails. The 13 mutations to try, one per invariant:
 //!
 //! 1. **portfolio_dag_acyclicity** — in `portfolio::dag::detect_cycle`, change
 //!    the query to always return `None`. The cycle test fails.
@@ -39,6 +40,11 @@
 //!     model_description test fails.
 //! 12. **issuer_dag_acyclicity** — in `issuer::dag::detect_cycle`, change the
 //!     query to always return `None`. The cycle test fails.
+//! 13. **identifier_uniqueness** — in `asset_identifier::create`, remove the
+//!     `claimant_of` pre-insert check (the database unique constraint would
+//!     still catch it and the mapping in `create.rs` turns it back into the
+//!     typed error; to see the test fail, also drop the mapping). The
+//!     `duplicate_identifier_on_second_asset_is_rejected` test fails.
 
 #![allow(unused_imports)]
 
@@ -194,5 +200,20 @@ fn invariant_12_issuer_dag_acyclicity() {
             .iter()
             .any(|i| i.contains("Issuer graph is a DAG")),
         "issuer DAG acyclicity invariant not found in model description"
+    );
+}
+
+/// US8: Invariant 13 — an external identifier names at most one subject
+/// within its domain. Tested in
+/// `asset_identifier::tests::duplicate_identifier_on_second_asset_is_rejected`
+/// and `issuer_identifier::tests::duplicate_identifier_within_issuer_domain_is_rejected`.
+#[test]
+fn invariant_13_identifier_uniqueness() {
+    let desc = model_description();
+    assert!(
+        desc.invariants
+            .iter()
+            .any(|i| i.contains("identifier names at most one subject")),
+        "identifier uniqueness invariant not found in model description"
     );
 }

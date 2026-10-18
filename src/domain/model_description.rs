@@ -368,6 +368,68 @@ pub fn model_description() -> ModelDescription {
                     },
                 ],
             },
+            // US8 (2026-10-18): external identifiers. Current-state keys,
+            // not dual-temporal facts — no as_of_date / knowledge_date.
+            EntityDescription {
+                name: "AssetIdentifier",
+                fields: vec![
+                    FieldDescription {
+                        name: "id",
+                        type_domain: "uuid",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "asset_id",
+                        type_domain: "uuid",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "scheme",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "value",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "created_at",
+                        type_domain: "timestamp",
+                        aggregates: &["none"],
+                    },
+                ],
+            },
+            EntityDescription {
+                name: "IssuerIdentifier",
+                fields: vec![
+                    FieldDescription {
+                        name: "id",
+                        type_domain: "uuid",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "issuer_id",
+                        type_domain: "uuid",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "scheme",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "value",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "created_at",
+                        type_domain: "timestamp",
+                        aggregates: &["none"],
+                    },
+                ],
+            },
         ],
         relationships: vec![
             RelationshipDescription {
@@ -455,6 +517,21 @@ pub fn model_description() -> ModelDescription {
                 cardinality_from: "0..*",
                 cardinality_to: "0..1",
             },
+            // US8 (2026-10-18): external identifiers
+            RelationshipDescription {
+                from: "Asset",
+                to: "AssetIdentifier",
+                label: "identified_by",
+                cardinality_from: "1",
+                cardinality_to: "0..*",
+            },
+            RelationshipDescription {
+                from: "Issuer",
+                to: "IssuerIdentifier",
+                label: "identified_by",
+                cardinality_from: "1",
+                cardinality_to: "0..*",
+            },
         ],
         invariants: vec![
             "Portfolio graph is a DAG.",
@@ -470,6 +547,9 @@ pub fn model_description() -> ModelDescription {
             "Identity fields are none.",
             // US2b: issuer DAG acyclicity (Invariant 12 from predecessor spec)
             "Issuer graph is a DAG.",
+            // US8 (2026-10-18): identifier uniqueness (Invariant 9 / FR-032
+            // of the predecessor spec)
+            "An external identifier names at most one subject within its domain.",
         ],
     }
 }

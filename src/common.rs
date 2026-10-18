@@ -32,6 +32,8 @@ const TABLES: &[&str] = &[
     "asset_reference_data",
     "issuer_reference_data",
     "portfolio_reference_data",
+    "asset_identifiers",
+    "issuer_identifiers",
     "positions",
     "events",
     "assets",

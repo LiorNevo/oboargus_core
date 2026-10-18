@@ -31,6 +31,8 @@ pub struct SeedSummary {
     pub portfolios_created: usize,
     pub events_created: usize,
     pub reference_data_records_created: usize,
+    /// External identifiers registered (US8, added 2026-10-18).
+    pub identifiers_created: usize,
 }
 
 /// Seed the database with a canonical dataset. Idempotent: re-running it on
@@ -214,6 +216,47 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
     .await?;
     summary.reference_data_records_created += 1;
 
+    // External identifiers (US8, 2026-10-18): human-readable, like the rest
+    // of the dataset. Values are illustrative, not real-world accurate.
+    use crate::domain::asset_identifier::create_asset_identifier;
+    use crate::domain::asset_identifier::entity::NewAssetIdentifier;
+    use crate::domain::identifier::IdentifierScheme;
+    use crate::domain::issuer_identifier::create_issuer_identifier;
+    use crate::domain::issuer_identifier::entity::NewIssuerIdentifier;
+
+    for (issuer, scheme, value) in [
+        (alphabet.id(), IdentifierScheme::LEI, "5493006MHB84DD0ZWV18"),
+        (google.id(), IdentifierScheme::LEI, "5493006MHB84DD0ZWV19"),
+    ] {
+        create_issuer_identifier(
+            pool,
+            NewIssuerIdentifier {
+                issuer_id: issuer,
+                scheme: scheme.to_string(),
+                value: value.to_string(),
+            },
+        )
+        .await?;
+        summary.identifiers_created += 1;
+    }
+    for (asset, scheme, value) in [
+        (aapl.id(), IdentifierScheme::TICKER, "AAPL"),
+        (aapl.id(), IdentifierScheme::ISIN, "US0378331005"),
+        (vti.id(), IdentifierScheme::TICKER, "VTI"),
+        (vti.id(), IdentifierScheme::ISIN, "US9229087690"),
+    ] {
+        create_asset_identifier(
+            pool,
+            NewAssetIdentifier {
+                asset_id: asset,
+                scheme: scheme.to_string(),
+                value: value.to_string(),
+            },
+        )
+        .await?;
+        summary.identifiers_created += 1;
+    }
+
     let _ = (
         AssetId::from_uuid(new_uuid()),
         IssuerId::from_uuid(new_uuid()),
@@ -240,7 +283,8 @@ mod tests {
                 assets_created: 0,
                 portfolios_created: 0,
                 events_created: 0,
-                reference_data_records_created: 0
+                reference_data_records_created: 0,
+                identifiers_created: 0
             }
         );
     }

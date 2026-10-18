@@ -10,12 +10,15 @@
 //! scaffolding (`error`, `id`, `model_description`, `seed`).
 
 pub mod asset;
+pub mod asset_identifier;
 pub mod asset_reference_data;
 pub mod entity_accessors;
 pub mod error;
 pub mod event;
 pub mod id;
+pub mod identifier;
 pub mod issuer;
+pub mod issuer_identifier;
 pub mod issuer_reference_data;
 pub mod model_description;
 pub mod portfolio;
@@ -27,6 +30,7 @@ pub mod seed;
 mod tests;
 
 pub use error::DomainError;
+pub use identifier::IdentifierScheme;
 pub use model_description::{
     EntityDescription, FieldDescription, ModelDescription, RelationshipDescription,
     model_description,

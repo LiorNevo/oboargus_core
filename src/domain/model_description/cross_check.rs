@@ -66,13 +66,26 @@ fn reference_data_entities_have_seven_fields_each() {
 }
 
 #[test]
-fn twelve_relationships() {
+fn identifier_entities_have_five_fields_each() {
     let desc = model_description();
-    assert_eq!(desc.relationships.len(), 12); // 11 original + issuer parent_of
+    for name in &["AssetIdentifier", "IssuerIdentifier"] {
+        let e = desc
+            .entities
+            .iter()
+            .find(|e| e.name == *name)
+            .unwrap_or_else(|| panic!("{}", name));
+        assert_eq!(e.fields.len(), 5, "{} should have 5 fields", name);
+    }
 }
 
 #[test]
-fn twelve_invariants() {
+fn fourteen_relationships() {
     let desc = model_description();
-    assert_eq!(desc.invariants.len(), 12); // 11 original + issuer DAG acyclicity
+    assert_eq!(desc.relationships.len(), 14); // 11 original + issuer parent_of + 2 identified_by
+}
+
+#[test]
+fn thirteen_invariants() {
+    let desc = model_description();
+    assert_eq!(desc.invariants.len(), 13); // 11 original + issuer DAG acyclicity + identifier uniqueness
 }

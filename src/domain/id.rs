@@ -48,6 +48,16 @@ pub struct IssuerId(pub Uuid);
 /// Implements FR-008 of spec 016-implement-domain-model.
 pub struct ReferenceDataId(pub Uuid);
 
+/// A typed id for either of the two external-identifier records
+/// (`AssetIdentifier`, `IssuerIdentifier`). Mirrors `ReferenceDataId`: one
+/// newtype covers both domains, exactly as one covers the three
+/// reference-data entities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(transparent)]
+#[serde(transparent)]
+/// Implements FR-023 of spec 016-implement-domain-model.
+pub struct IdentifierId(pub Uuid);
+
 /// A trait implemented by all entity-id newtypes. Provides a uniform
 /// constructor and a uniform accessor.
 pub trait DomainId: Copy + Eq {
@@ -88,6 +98,7 @@ impl_domain_id!(AssetId);
 impl_domain_id!(EventId);
 impl_domain_id!(IssuerId);
 impl_domain_id!(ReferenceDataId);
+impl_domain_id!(IdentifierId);
 
 /// Generate a fresh `Uuid` v4.
 /// Implements FR-008 of spec 016-implement-domain-model.
