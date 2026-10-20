@@ -420,4 +420,27 @@ mod tests {
         assert!(chosen.is_none());
         assert_eq!(map.len(), 2);
     }
+
+    /// A source that was consulted but produced no entry in the per-source
+    /// map (e.g. it was skipped because its scheme did not match) is
+    /// recorded in the audit map as `{"skipped": true}` rather than being
+    /// silently dropped (FR-022).
+    #[test]
+    fn a_source_missing_from_the_map_is_recorded_as_skipped() {
+        let mut per_source = BTreeMap::new();
+        per_source.insert("a".to_string(), Ok(bar("a", 100)));
+        // "b" was consulted but never answered.
+        let sources: Vec<String> = vec!["a".to_string(), "b".to_string()];
+
+        let (map, chosen) =
+            apply_policy(ReconciliationPolicy::FirstNonEmpty, &per_source, &sources);
+        assert_eq!(chosen.expect("a canonical answer").source_id, "a");
+        assert_eq!(map.len(), 2, "both consulted sources must be recorded");
+        assert_eq!(
+            map.get("b").and_then(|v| v.get("skipped")),
+            Some(&serde_json::Value::Bool(true)),
+            "the skipped source should be marked (got {:?})",
+            map.get("b")
+        );
+    }
 }

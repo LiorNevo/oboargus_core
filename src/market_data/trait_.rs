@@ -99,6 +99,7 @@ impl fmt::Debug for dyn MarketDataProvider + Send + Sync {
 mod tests {
     use super::*;
     use crate::market_data::error::MarketDataProviderError;
+    use crate::market_data::types::TypedIdentifier;
 
     /// A minimal provider used to exercise the trait's ergonomics.
     struct Tiny;
@@ -151,7 +152,6 @@ mod tests {
     /// binding must compile without a `where Self: Sized` constraint. This
     /// test is a build-check — passing means we can put concrete providers
     /// behind a trait object (which the registry does in practice).
-    #[allow(dead_code)]
     fn _object_safety(_provider: Box<dyn MarketDataProvider + Send + Sync>) {
         let _ = _provider.source_id();
     }
@@ -168,5 +168,87 @@ mod tests {
         );
         assert!(rendered.contains("enabled: true"), "got: {rendered}");
         assert!(rendered.contains("priority: 5"), "got: {rendered}");
+    }
+
+    /// The trait's accessors return what the implementation declares.
+    #[test]
+    fn accessors_return_the_implementation_values() {
+        let provider = Tiny;
+        assert_eq!(provider.source_id(), "tiny");
+        assert_eq!(provider.display_name(), "Tiny Provider");
+        assert!(provider.supported_schemes().is_empty());
+        assert!(provider.enabled());
+        assert_eq!(provider.priority(), 5);
+    }
+
+    /// A provider behind a trait object exposes the same accessors.
+    #[test]
+    fn accessors_are_reachable_through_a_trait_object() {
+        let provider: Box<dyn MarketDataProvider + Send + Sync> = Box::new(Tiny);
+        assert_eq!(provider.source_id(), "tiny");
+        assert_eq!(provider.display_name(), "Tiny Provider");
+        assert!(provider.supported_schemes().is_empty());
+        assert!(provider.enabled());
+        assert_eq!(provider.priority(), 5);
+    }
+
+    /// The object-safety build check compiles and runs: a provider can be
+    /// held behind `dyn MarketDataProvider + Send + Sync`.
+    #[test]
+    fn object_safety_holds() {
+        _object_safety(Box::new(Tiny));
+    }
+
+    /// `get_latest_bar` on a provider that does not implement the operation
+    /// surfaces the typed `Unsupported` error (FR-005).
+    #[tokio::test]
+    async fn latest_bar_is_unsupported_by_a_minimal_provider() {
+        let provider = Tiny;
+        let error = provider
+            .get_latest_bar(LatestBarRequest::now(TypedIdentifier::new(
+                "TICKER", "AAPL",
+            )))
+            .await
+            .expect_err("err");
+        assert!(
+            matches!(error, MarketDataProviderError::Unsupported(ref msg) if msg == "tiny"),
+            "got: {error:?}"
+        );
+    }
+
+    /// `get_historical_range` on a provider that does not implement the
+    /// operation surfaces the typed `Unsupported` error (FR-005).
+    #[tokio::test]
+    async fn historical_range_is_unsupported_by_a_minimal_provider() {
+        let provider = Tiny;
+        let error = provider
+            .get_historical_range(HistoricalRangeRequest {
+                identifier: TypedIdentifier::new("TICKER", "AAPL"),
+                from: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date"),
+                to: chrono::NaiveDate::from_ymd_opt(2026, 1, 31).expect("date"),
+            })
+            .await
+            .expect_err("err");
+        assert!(
+            matches!(error, MarketDataProviderError::Unsupported(ref msg) if msg == "tiny"),
+            "got: {error:?}"
+        );
+    }
+
+    /// `lookup_ticker` on a provider that does not implement the operation
+    /// surfaces the typed `Unsupported` error (FR-012).
+    #[tokio::test]
+    async fn ticker_lookup_is_unsupported_by_a_minimal_provider() {
+        let provider = Tiny;
+        let error = provider
+            .lookup_ticker(TickerLookupRequest {
+                query: "AAPL".to_string(),
+            })
+            .await
+            .expect_err("err");
+        assert!(
+            matches!(error, MarketDataProviderError::Unsupported(ref msg) if msg == "tiny"),
+            "got: {error:?}"
+        );
     }
 }

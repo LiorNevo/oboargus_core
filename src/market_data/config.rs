@@ -348,4 +348,108 @@ mod tests {
     fn default_yahoo_passes_per_source_validation() {
         assert_eq!(DataSourceConfig::default_yahoo().validate(), Ok(()));
     }
+
+    // ---------- per-source validation inside MarketDataConfig ----------
+
+    /// A source with an empty `source_id` is rejected by the aggregate
+    /// validation, naming the offending index (FR-003).
+    #[test]
+    fn empty_source_id_rejected_by_market_data_config() {
+        let mut config = MarketDataConfig::default();
+        config.sources[0].source_id = String::new();
+        let result = config.validate();
+        assert!(
+            matches!(
+                result,
+                Err(MarketDataProviderError::Validation(ref msg))
+                    if msg.contains("source_id must be non-empty")
+            ),
+            "got: {result:?}"
+        );
+    }
+
+    // ---------- DataSourceConfig::validate ----------
+
+    /// `DataSourceConfig::validate` rejects an empty `source_id` (FR-003).
+    #[test]
+    fn per_source_empty_source_id_rejected() {
+        let mut config = DataSourceConfig::default_yahoo();
+        config.source_id = String::new();
+        let result = config.validate();
+        assert!(
+            matches!(
+                result,
+                Err(MarketDataProviderError::Validation(ref msg))
+                    if msg.contains("source_id must be non-empty")
+            ),
+            "got: {result:?}"
+        );
+    }
+
+    /// `DataSourceConfig::validate` rejects a non-positive priority (FR-002).
+    #[test]
+    fn per_source_non_positive_priority_rejected() {
+        let mut config = DataSourceConfig::default_yahoo();
+        config.priority = 0;
+        let result = config.validate();
+        assert!(
+            matches!(
+                result,
+                Err(MarketDataProviderError::Validation(ref msg))
+                    if msg.contains("priority must be > 0")
+            ),
+            "got: {result:?}"
+        );
+    }
+
+    /// `DataSourceConfig::validate` rejects a timeout outside `1..=600`.
+    #[test]
+    fn per_source_timeout_out_of_range_rejected() {
+        let mut config = DataSourceConfig::default_yahoo();
+        config.timeout_seconds = Some(0);
+        let result = config.validate();
+        assert!(
+            matches!(
+                result,
+                Err(MarketDataProviderError::Validation(ref msg))
+                    if msg.contains("timeout_seconds must be in 1..=600")
+            ),
+            "got: {result:?}"
+        );
+    }
+
+    /// A timeout of exactly 600 is accepted (the bound is inclusive).
+    #[test]
+    fn per_source_timeout_at_the_upper_bound_is_accepted() {
+        let mut config = DataSourceConfig::default_yahoo();
+        config.timeout_seconds = Some(600);
+        assert_eq!(config.validate(), Ok(()));
+    }
+
+    // ---------- serde defaults ----------
+
+    /// A source deserialized without `enabled` / `priority` gets the
+    /// documented defaults (`true` / `10`).
+    #[test]
+    fn serde_defaults_fill_enabled_and_priority() {
+        let config: DataSourceConfig =
+            serde_json::from_str(r#"{"source_id":"s","provider_type":"yahoo_finance"}"#)
+                .expect("deserialize");
+        assert!(config.enabled);
+        assert_eq!(config.priority, 10);
+        assert!(config.supported_schemes.is_empty());
+        assert_eq!(config.retry, RetryConfig::default());
+    }
+
+    /// An explicit `enabled: false` / `priority` in the JSON wins over the
+    /// serde defaults.
+    #[test]
+    fn serde_defaults_do_not_override_explicit_values() {
+        let config: DataSourceConfig = serde_json::from_str(
+            r#"{"source_id":"s","provider_type":"yahoo_finance","enabled":false,"priority":3}"#,
+        )
+        .expect("deserialize");
+        assert!(!config.enabled);
+        assert_eq!(config.priority, 3);
+    }
 }

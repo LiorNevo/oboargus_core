@@ -343,7 +343,8 @@ pub(crate) mod tests {
 
     use crate::market_data::error::MarketDataProviderError;
     use crate::market_data::types::{
-        HistoricalRange, LatestBar, LatestBarRequest, PriceBar, TypedIdentifier,
+        HistoricalRange, LatestBar, LatestBarRequest, PriceBar, TickerLookupHit,
+        TickerLookupResult, TypedIdentifier,
     };
 
     /// A `MockMarketDataProvider` driven by per-method response maps.
@@ -357,6 +358,10 @@ pub(crate) mod tests {
         pub priority: i32,
         pub enabled: bool,
         pub latest: HashMap<String, Result<LatestBar, MarketDataProviderError>>,
+        /// Per-key responses for `get_historical_range`.
+        pub historical: HashMap<String, Result<HistoricalRange, MarketDataProviderError>>,
+        /// Per-query responses for `lookup_ticker`.
+        pub lookup: HashMap<String, Result<TickerLookupResult, MarketDataProviderError>>,
     }
 
     impl MockMarketDataProvider {
@@ -371,6 +376,8 @@ pub(crate) mod tests {
                 priority,
                 enabled: true,
                 latest: HashMap::new(),
+                historical: HashMap::new(),
+                lookup: HashMap::new(),
             }
         }
     }
@@ -411,20 +418,33 @@ pub(crate) mod tests {
 
         async fn get_historical_range(
             &self,
-            _request: crate::market_data::types::HistoricalRangeRequest,
+            request: crate::market_data::types::HistoricalRangeRequest,
         ) -> Result<HistoricalRange, MarketDataProviderError> {
-            Err(MarketDataProviderError::Unsupported(
-                "mock: historical_range not implemented".into(),
-            ))
+            let key = format!("{}:{}", request.identifier.scheme, request.identifier.value);
+            match self.historical.get(&key) {
+                Some(r) => match r {
+                    Ok(range) => Ok(range.clone()),
+                    Err(e) => Err(e.clone()),
+                },
+                None => Err(MarketDataProviderError::Unsupported(
+                    "mock: historical_range not implemented".into(),
+                )),
+            }
         }
 
         async fn lookup_ticker(
             &self,
-            _request: TickerLookupRequest,
+            request: TickerLookupRequest,
         ) -> Result<TickerLookupResult, MarketDataProviderError> {
-            Err(MarketDataProviderError::Unsupported(
-                "mock: lookup not implemented".into(),
-            ))
+            match self.lookup.get(&request.query) {
+                Some(r) => match r {
+                    Ok(result) => Ok(result.clone()),
+                    Err(e) => Err(e.clone()),
+                },
+                None => Err(MarketDataProviderError::Unsupported(
+                    "mock: lookup not implemented".into(),
+                )),
+            }
         }
     }
 
@@ -574,6 +594,327 @@ pub(crate) mod tests {
         let provider: Arc<dyn MarketDataProvider + Send + Sync> =
             Arc::new(MockMarketDataProvider::new("mock", &["TICKER"], 10));
         DataSourceRegistry::new(vec![provider]).expect("registry")
+    }
+
+    // ---------- enabled_count / disabled-source filtering ----------
+
+    /// `enabled_count` counts only the enabled providers; disabled ones stay
+    /// in `enumerate_sources` (FR-002 / FR-004).
+    #[test]
+    fn enabled_count_counts_only_enabled_sources() {
+        let mut enabled = MockMarketDataProvider::new("a_enabled", &["TICKER"], 10);
+        enabled.enabled = true;
+        let mut disabled = MockMarketDataProvider::new("b_disabled", &["TICKER"], 20);
+        disabled.enabled = false;
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(enabled) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(disabled) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        assert_eq!(registry.enabled_count(), 1);
+        // The disabled source is still enumerated, flagged as disabled.
+        let sources = registry.enumerate_sources();
+        assert_eq!(sources.len(), 2);
+        assert!(!sources[1].enabled, "the disabled source must be flagged");
+    }
+
+    /// A disabled provider is skipped by the walk even when it is the only
+    /// one that could answer the request (FR-004).
+    #[tokio::test]
+    async fn disabled_sources_are_not_walked() {
+        let mut disabled = MockMarketDataProvider::new("only", &["TICKER"], 10);
+        disabled.enabled = false;
+        disabled
+            .latest
+            .insert("TICKER:AAPL".to_string(), Ok(make_bar("only")));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(disabled) as Arc<dyn MarketDataProvider + Send + Sync>
+        ])
+        .expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let err = registry.get_latest_bar(request).await.expect_err("err");
+        assert!(
+            matches!(err, MarketDataProviderError::NotFound(ref msg) if msg.contains("no enabled source")),
+            "got: {err:?}"
+        );
+    }
+
+    // ---------- walk_latest_bar failure bookkeeping ----------
+
+    /// A retryable error is recorded in `failures` and the walk continues to
+    /// the next candidate (FR-005 / FR-007).
+    #[tokio::test]
+    async fn walk_latest_bar_records_retryable_failures() {
+        let mut a = MockMarketDataProvider::new("a_retryable", &["TICKER"], 10);
+        a.latest.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Transient("boom".into())),
+        );
+        let mut b = MockMarketDataProvider::new("b_ok", &["TICKER"], 20);
+        b.latest
+            .insert("TICKER:AAPL".to_string(), Ok(make_bar("b_ok")));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let outcome = registry.walk_latest_bar(request).await;
+        assert!(outcome.bar.is_some(), "the walk should have produced a bar");
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].source_id, "a_retryable");
+        assert!(outcome.error.is_none());
+    }
+
+    /// A final (non-retryable) error ends the walk and is recorded in
+    /// `failures` with the typed error (FR-005 / FR-007).
+    #[tokio::test]
+    async fn walk_latest_bar_records_final_failure() {
+        let mut a = MockMarketDataProvider::new("a_final", &["TICKER"], 10);
+        a.latest.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Unauthorized("no key".into())),
+        );
+        let mut b = MockMarketDataProvider::new("b_ok", &["TICKER"], 20);
+        b.latest
+            .insert("TICKER:AAPL".to_string(), Ok(make_bar("b_ok")));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let outcome = registry.walk_latest_bar(request).await;
+        assert!(outcome.bar.is_none(), "a final error must stop the walk");
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].source_id, "a_final");
+        assert!(matches!(
+            outcome.error,
+            Some(MarketDataProviderError::Unauthorized(_))
+        ));
+    }
+
+    /// When every enabled candidate returns a retryable error, the walk
+    /// surfaces the LAST retryable error and keeps every failure (FR-005).
+    #[tokio::test]
+    async fn walk_latest_bar_surfaces_last_retryable_error() {
+        let mut a = MockMarketDataProvider::new("a_first", &["TICKER"], 10);
+        a.latest.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Transient("first".into())),
+        );
+        let mut b = MockMarketDataProvider::new("b_last", &["TICKER"], 20);
+        b.latest.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::RateLimited {
+                msg: "budget exhausted".into(),
+                retry_after: None,
+            }),
+        );
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let outcome = registry.walk_latest_bar(request).await;
+        assert!(outcome.bar.is_none());
+        assert_eq!(outcome.failures.len(), 2);
+        assert!(matches!(
+            outcome.error,
+            Some(MarketDataProviderError::RateLimited { .. })
+        ));
+    }
+
+    // ---------- get_historical_range ----------
+
+    /// The historical walk returns the first successful candidate's range.
+    #[tokio::test]
+    async fn get_historical_range_returns_first_success() {
+        let mut a = MockMarketDataProvider::new("a_ok", &["TICKER"], 10);
+        a.historical
+            .insert("TICKER:AAPL".to_string(), Ok(make_range("a_ok", 2)));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>
+        ])
+        .expect("registry");
+        let range = registry
+            .get_historical_range(historical_request())
+            .await
+            .expect("range");
+        assert_eq!(range.source_id, "a_ok");
+        assert_eq!(range.bars.len(), 2);
+    }
+
+    /// No enabled source supports the scheme → `NotFound` (FR-005).
+    #[tokio::test]
+    async fn get_historical_range_without_candidates_returns_not_found() {
+        let a: Arc<dyn MarketDataProvider + Send + Sync> =
+            Arc::new(MockMarketDataProvider::new("a", &["ISIN"], 10));
+        let registry = DataSourceRegistry::new(vec![a]).expect("registry");
+        let err = registry
+            .get_historical_range(historical_request())
+            .await
+            .expect_err("err");
+        assert!(
+            matches!(err, MarketDataProviderError::NotFound(ref msg) if msg.contains("no enabled source")),
+            "got: {err:?}"
+        );
+    }
+
+    /// A retryable error falls over to the next candidate (FR-005).
+    #[tokio::test]
+    async fn get_historical_range_falls_over_on_retryable_error() {
+        let mut a = MockMarketDataProvider::new("a_retryable", &["TICKER"], 10);
+        a.historical.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Transient("boom".into())),
+        );
+        let mut b = MockMarketDataProvider::new("b_ok", &["TICKER"], 20);
+        b.historical
+            .insert("TICKER:AAPL".to_string(), Ok(make_range("b_ok", 1)));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        let range = registry
+            .get_historical_range(historical_request())
+            .await
+            .expect("range");
+        assert_eq!(range.source_id, "b_ok");
+    }
+
+    /// A final error ends the historical walk immediately (FR-005).
+    #[tokio::test]
+    async fn get_historical_range_final_error_stops_the_walk() {
+        let mut a = MockMarketDataProvider::new("a_final", &["TICKER"], 10);
+        a.historical.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::InvalidInput("bad range".into())),
+        );
+        let mut b = MockMarketDataProvider::new("b_ok", &["TICKER"], 20);
+        b.historical
+            .insert("TICKER:AAPL".to_string(), Ok(make_range("b_ok", 1)));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        let err = registry
+            .get_historical_range(historical_request())
+            .await
+            .expect_err("err");
+        assert!(matches!(err, MarketDataProviderError::InvalidInput(_)));
+    }
+
+    /// Every candidate retryable → the last retryable error is surfaced.
+    #[tokio::test]
+    async fn get_historical_range_surfaces_last_retryable_error() {
+        let mut a = MockMarketDataProvider::new("a_first", &["TICKER"], 10);
+        a.historical.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Transient("first".into())),
+        );
+        let mut b = MockMarketDataProvider::new("b_last", &["TICKER"], 20);
+        b.historical.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Transient("last".into())),
+        );
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        let err = registry
+            .get_historical_range(historical_request())
+            .await
+            .expect_err("err");
+        assert!(
+            matches!(err, MarketDataProviderError::Transient(ref msg) if msg == "last"),
+            "got: {err:?}"
+        );
+    }
+
+    // ---------- every_source_lookup_ticker ----------
+
+    /// The lookup map carries every enabled source's answer, including the
+    /// failures (FR-006 / FR-012).
+    #[tokio::test]
+    async fn every_source_lookup_ticker_returns_per_source_map() {
+        let mut a = MockMarketDataProvider::new("a", &["TICKER"], 10);
+        a.lookup.insert(
+            "MSFT".to_string(),
+            Ok(TickerLookupResult {
+                hits: vec![make_hit("MSFT", 0.9)],
+                source_id: "a".to_string(),
+            }),
+        );
+        let mut b = MockMarketDataProvider::new("b", &["TICKER"], 20);
+        b.lookup.insert(
+            "MSFT".to_string(),
+            Err(MarketDataProviderError::NotFound("no hit".into())),
+        );
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        let map = registry
+            .every_source_lookup_ticker(TickerLookupRequest {
+                query: "MSFT".to_string(),
+            })
+            .await;
+        assert_eq!(map.len(), 2);
+        assert_eq!(map["a"].as_ref().expect("a").hits.len(), 1);
+        assert!(map["b"].is_err());
+    }
+
+    // ---------- fixtures ----------
+
+    /// A historical request for `TICKER:AAPL` over a fixed date window.
+    fn historical_request() -> crate::market_data::types::HistoricalRangeRequest {
+        crate::market_data::types::HistoricalRangeRequest {
+            identifier: TypedIdentifier::new("TICKER", "AAPL"),
+            from: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date"),
+            to: chrono::NaiveDate::from_ymd_opt(2026, 1, 31).expect("date"),
+        }
+    }
+
+    /// A historical range with `bars` synthetic bars.
+    fn make_range(source: &str, bars: usize) -> HistoricalRange {
+        use chrono::NaiveDate;
+        use rust_decimal::Decimal;
+        HistoricalRange {
+            bars: (0..bars)
+                .map(|i| PriceBar {
+                    as_of_date: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date")
+                        + chrono::Duration::days(i as i64),
+                    open: Decimal::new(100, 0),
+                    high: Decimal::new(101, 0),
+                    low: Decimal::new(99, 0),
+                    close: Decimal::new(100, 0),
+                    adjclose: Decimal::new(100, 0),
+                    volume: 1_000_000,
+                })
+                .collect(),
+            knowledge_date: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+            source_id: source.to_string(),
+        }
+    }
+
+    /// A single ticker-lookup hit.
+    fn make_hit(symbol: &str, relevance: f64) -> TickerLookupHit {
+        TickerLookupHit {
+            symbol: symbol.to_string(),
+            short_name: Some("Short".to_string()),
+            long_name: Some("Long Name".to_string()),
+            quote_type: Some("EQUITY".to_string()),
+            exchange: Some("NMS".to_string()),
+            currency: None,
+            schemes: vec![("ISIN".to_string(), "US0378331005".to_string())],
+            relevance: Some(relevance),
+        }
     }
 
     // Suppress unused-import warning when #[cfg(test)] is dormant

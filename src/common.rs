@@ -17,6 +17,15 @@
 //! isolation to a per-test `Transaction` (correct + parallel); the
 //! current serial approach is the smallest correct change.
 //!
+//! The same database is shared with the **other** crates'
+//! integration tests (`obolargus_server`'s `market_data_e2e.rs` and
+//! `obolargus_cli`'s `sync_db.rs`), so two crates' test suites must
+//! not run at the same time either. The root `Makefile`'s `test` and
+//! `coverage` targets run the submodules one after another, which is
+//! the supported way to run them. Running two crates' suites
+//! concurrently in separate shells causes `TRUNCATE` cross-talk and
+//! spurious foreign-key failures.
+//!
 //! The fixture connects to the **test** database (named by
 //! `TEST_DATABASE_URL`), NEVER the production database. The
 //! `db-cleanup` binary refuses to run against `DATABASE_URL`; this
@@ -37,6 +46,13 @@ const TABLES: &[&str] = &[
     "issuer_identifiers",
     "positions",
     "events",
+    // Market-data audit tables. `data_source_reconciliation_audits`
+    // references `assets`, so it is truncated before `assets` (the
+    // `CASCADE` would handle the order either way, but keeping the
+    // dependency order explicit makes the list readable).
+    "data_source_reconciliation_audits",
+    "data_source_refresh_runs",
+    "data_sources",
     "assets",
     "issuers",
     "portfolios",

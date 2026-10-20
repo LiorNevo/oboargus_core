@@ -414,4 +414,20 @@ mod tests {
             created_at: chrono::Utc::now(),
         }
     }
+
+    /// `RefreshConfig::cli_all` scans every asset and labels the audit run
+    /// `"cli"` (FR-030).
+    #[test]
+    fn cli_all_scans_every_asset() {
+        let config = RefreshConfig::cli_all();
+        assert!(config.assets.is_none(), "cli_all must not pin a list");
+        assert_eq!(config.trigger, "cli");
+    }
+
+    /// `today()` is the dual-temporal `knowledge_date` used by the refresh
+    /// run (FR-014).
+    #[test]
+    fn today_is_the_current_utc_date() {
+        assert_eq!(today(), Utc::now().date_naive());
+    }
 }
