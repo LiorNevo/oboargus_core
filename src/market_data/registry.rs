@@ -1,0 +1,582 @@
+//! `DataSourceRegistry` — the consumer-facing façade over configured providers.
+//!
+//! Implements FR-001 / FR-002 / FR-003 / FR-004 / FR-005 / FR-006 / FR-007
+//! of `specs/017-yahoo-data-source/spec.md`. The registry holds
+//! `Box<dyn MarketDataProvider + Send + Sync>` trait objects and walks them
+//! in `(priority ASC, source_id ASC)` order, applying the failover policy
+//! (Transient / RateLimited fall over; the rest are final).
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use serde::Serialize;
+
+use crate::market_data::error::MarketDataProviderError;
+use crate::market_data::trait_::MarketDataProvider;
+use crate::market_data::types::{
+    HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, TickerLookupRequest,
+    TickerLookupResult,
+};
+
+/// Lightweight, serializable description of one configured source.
+///
+/// Returned by [`DataSourceRegistry::enumerate_sources`] (FR-002).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SourceDescriptor {
+    /// Stable id (e.g. `"yahoo_finance"`).
+    pub source_id: String,
+    /// Human-readable name.
+    pub display_name: String,
+    /// Enabled flag at the time of enumeration.
+    pub enabled: bool,
+    /// Numeric priority (lower = tried first).
+    pub priority: i32,
+    /// Identifier schemes this source can answer.
+    pub supported_schemes: Vec<String>,
+}
+
+/// One source's failure during a registry walk.
+///
+/// The orchestrator records these in `data_source_refresh_runs.per_source_failed`
+/// so the audit names the source that failed (FR-032).
+///
+/// Implements FR-007 / FR-032 of spec 017.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceFailure {
+    /// The stable id of the source that failed.
+    pub source_id: String,
+    /// The typed error it returned.
+    pub error: MarketDataProviderError,
+}
+
+/// The outcome of a registry walk.
+///
+/// Carries the answer (when a source produced one), the typed error that
+/// ended the walk (when it did not), and every source that failed along
+/// the way. The failure list is what the refresh orchestrator records in
+/// `data_source_refresh_runs.per_source_failed` (FR-032).
+///
+/// Implements FR-005 / FR-007 / FR-032 of spec 017.
+#[derive(Debug, Clone)]
+pub struct WalkOutcome {
+    /// The answer, when a source produced one.
+    pub bar: Option<LatestBar>,
+    /// The typed error that ended the walk, when it produced no answer.
+    pub error: Option<MarketDataProviderError>,
+    /// Every source that failed during the walk, in the order consulted.
+    pub failures: Vec<SourceFailure>,
+}
+
+/// Source-agnostic façade. Constructed at startup with one trait object per
+/// configured source. Consumers call the registry, not individual providers.
+///
+/// Implements US3 of spec 017.
+pub struct DataSourceRegistry {
+    /// Enabled providers only, sorted by `(priority ASC, source_id ASC)`.
+    /// Disabled providers are filtered out at construction time.
+    enabled: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+    /// All providers (enabled or disabled), for enumeration. Sorted by
+    /// `source_id ASC`.
+    all: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+}
+
+impl DataSourceRegistry {
+    /// Construct from a vec of providers. Validates unique `source_id`
+    /// (FR-003); fails fast on duplicates with a typed error.
+    ///
+    /// Disabled providers are filtered out of the walking list but kept
+    /// for `enumerate_sources` (FR-002). If the enabled list is empty
+    /// AND at least one provider was supplied, returns
+    /// `Validation` (per the FR-005 reconciliation Edge Cases entry).
+    pub fn new(
+        providers: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+    ) -> Result<Self, MarketDataProviderError> {
+        // Duplicate detection
+        let mut ids_seen = std::collections::BTreeSet::new();
+        for p in &providers {
+            if !ids_seen.insert(p.source_id().to_string()) {
+                return Err(MarketDataProviderError::Validation(format!(
+                    "duplicate source_id '{}'",
+                    p.source_id()
+                )));
+            }
+        }
+        // All providers (sorted by id ASC for enumeration)
+        let mut all = providers;
+        all.sort_by(|a, b| a.source_id().cmp(b.source_id()));
+
+        // Enabled providers (sorted by (priority ASC, source_id ASC) for
+        // walking; ties broken alphabetically)
+        let mut enabled: Vec<Arc<dyn MarketDataProvider + Send + Sync>> =
+            all.iter().filter(|p| p.enabled()).cloned().collect();
+        enabled.sort_by(|a, b| {
+            a.priority()
+                .cmp(&b.priority())
+                .then_with(|| a.source_id().cmp(b.source_id()))
+        });
+
+        Ok(Self { enabled, all })
+    }
+
+    /// List every configured source, enabled or not, in `source_id ASC`
+    /// order (FR-002). Disabled sources appear with `enabled: false`.
+    pub fn enumerate_sources(&self) -> Vec<SourceDescriptor> {
+        self.all
+            .iter()
+            .map(|p| SourceDescriptor {
+                source_id: p.source_id().to_string(),
+                display_name: p.display_name().to_string(),
+                enabled: p.enabled(),
+                priority: p.priority(),
+                supported_schemes: p.supported_schemes().to_vec(),
+            })
+            .collect()
+    }
+
+    /// Returns the count of enabled sources.
+    ///
+    /// Implements FR-002 of spec 017 (reconciliation requires >= 2).
+    pub fn enabled_count(&self) -> usize {
+        self.enabled.len()
+    }
+
+    /// "First success" walk. Walks enabled providers in
+    /// `(priority, source_id)` order; calls the first one whose
+    /// `supported_schemes` contains the request's scheme; on
+    /// `Transient` / `RateLimited` falls over; on `NotFound` /
+    /// `InvalidInput` / `Unsupported` / `Unauthorized` /
+    /// `Infrastructure` returns immediately. If no enabled source
+    /// matches the request's scheme, returns `Err(NotFound)`. If every
+    /// enabled source returns a retryable error, surfaces the LAST
+    /// encountered retryable error (preserved upstream message).
+    ///
+    /// Implements FR-005 of spec 017.
+    pub async fn get_latest_bar(
+        &self,
+        request: LatestBarRequest,
+    ) -> Result<LatestBar, MarketDataProviderError> {
+        let outcome = self.walk_latest_bar(request).await;
+        match (outcome.bar, outcome.error) {
+            (Some(bar), _) => Ok(bar),
+            (None, Some(error)) => Err(error),
+            (None, None) => Err(MarketDataProviderError::Infrastructure(
+                "registry walked all enabled candidates without a final answer".into(),
+            )),
+        }
+    }
+
+    /// The "first success" walk, plus the per-source failures it
+    /// encountered along the way.
+    ///
+    /// The outcome always carries the failure list — including when the
+    /// walk produced no answer — so the refresh orchestrator can record
+    /// the failing source ids in `per_source_failed` (FR-032). The audit
+    /// names the *source* that failed, not an opaque marker.
+    ///
+    /// Implements FR-005 / FR-007 / FR-032 of spec 017.
+    pub async fn walk_latest_bar(&self, request: LatestBarRequest) -> WalkOutcome {
+        let candidates = self.candidates_for(&request.identifier.scheme);
+        if candidates.is_empty() {
+            return WalkOutcome {
+                bar: None,
+                error: Some(MarketDataProviderError::NotFound(format!(
+                    "no enabled source supports scheme '{}'",
+                    request.identifier.scheme
+                ))),
+                failures: Vec::new(),
+            };
+        }
+        let mut last_retryable: Option<MarketDataProviderError> = None;
+        let mut failures: Vec<SourceFailure> = Vec::new();
+        for provider in &candidates {
+            match provider.get_latest_bar(request.clone()).await {
+                Ok(bar) => {
+                    return WalkOutcome {
+                        bar: Some(bar),
+                        error: None,
+                        failures,
+                    };
+                }
+                Err(e) if e.should_fallover() => {
+                    tracing::warn!(
+                        source_id = provider.source_id(),
+                        error = %e,
+                        "provider returned retryable error; falling over"
+                    );
+                    failures.push(SourceFailure {
+                        source_id: provider.source_id().to_string(),
+                        error: e.clone(),
+                    });
+                    last_retryable = Some(e);
+                }
+                Err(e) => {
+                    tracing::info!(
+                        source_id = provider.source_id(),
+                        error = %e,
+                        "provider returned final error; not falling over"
+                    );
+                    failures.push(SourceFailure {
+                        source_id: provider.source_id().to_string(),
+                        error: e.clone(),
+                    });
+                    return WalkOutcome {
+                        bar: None,
+                        error: Some(e),
+                        failures,
+                    };
+                }
+            }
+        }
+        WalkOutcome {
+            bar: None,
+            error: Some(last_retryable.unwrap_or_else(|| {
+                MarketDataProviderError::Infrastructure(
+                    "registry walked all enabled candidates without a final answer".into(),
+                )
+            })),
+            failures,
+        }
+    }
+
+    /// Same walking policy as `get_latest_bar`, for `get_historical_range`.
+    ///
+    /// Implements FR-005 of spec 017.
+    pub async fn get_historical_range(
+        &self,
+        request: HistoricalRangeRequest,
+    ) -> Result<HistoricalRange, MarketDataProviderError> {
+        let candidates = self.candidates_for(&request.identifier.scheme);
+        if candidates.is_empty() {
+            return Err(MarketDataProviderError::NotFound(format!(
+                "no enabled source supports scheme '{}'",
+                request.identifier.scheme
+            )));
+        }
+        let mut last_retryable: Option<MarketDataProviderError> = None;
+        for provider in &candidates {
+            match provider.get_historical_range(request.clone()).await {
+                Ok(range) => return Ok(range),
+                Err(e) if e.should_fallover() => {
+                    last_retryable = Some(e);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_retryable.unwrap_or_else(|| {
+            MarketDataProviderError::Infrastructure(
+                "registry walked all enabled candidates without a final answer".into(),
+            )
+        }))
+    }
+
+    /// "Every enabled source's answer" — never fails because of a single
+    /// source's failure. Returns a map keyed by `source_id` whose values
+    /// are `Result<…, MarketDataProviderError>`. Sequential in v1
+    /// (research D-out-of-scope; parallel batch is a follow-on).
+    ///
+    /// Implements FR-006 of spec 017.
+    pub async fn every_source_latest_bar(
+        &self,
+        request: LatestBarRequest,
+    ) -> BTreeMap<String, Result<LatestBar, MarketDataProviderError>> {
+        let mut out = BTreeMap::new();
+        for provider in &self.enabled {
+            let outcome = provider.get_latest_bar(request.clone()).await;
+            out.insert(provider.source_id().to_string(), outcome);
+        }
+        out
+    }
+
+    /// "Every enabled source's answer" for ticker lookup. Mirrors
+    /// `every_source_latest_bar`.
+    ///
+    /// Implements FR-006 / FR-012 of spec 017.
+    pub async fn every_source_lookup_ticker(
+        &self,
+        request: TickerLookupRequest,
+    ) -> BTreeMap<String, Result<TickerLookupResult, MarketDataProviderError>> {
+        let mut out = BTreeMap::new();
+        for provider in &self.enabled {
+            let outcome = provider.lookup_ticker(request.clone()).await;
+            out.insert(provider.source_id().to_string(), outcome);
+        }
+        out
+    }
+
+    /// Filters the enabled list to providers whose `supported_schemes`
+    /// contains `scheme` (with `TICKER:*` matching any `TICKER:XXX`).
+    fn candidates_for(&self, scheme: &str) -> Vec<Arc<dyn MarketDataProvider + Send + Sync>> {
+        self.enabled
+            .iter()
+            .filter(|p| scheme_matches(p.supported_schemes(), scheme))
+            .cloned()
+            .collect()
+    }
+}
+
+fn scheme_matches(supported: &[String], scheme: &str) -> bool {
+    for s in supported {
+        if s == scheme {
+            return true;
+        }
+        if let Some(prefix) = s.strip_suffix(":*")
+            && scheme.starts_with(prefix)
+            && scheme.contains(':')
+        {
+            return true;
+        }
+        if s == "*" {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::market_data::config::DataSourceConfig;
+    use async_trait::async_trait;
+    use chrono::Utc;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    use crate::market_data::error::MarketDataProviderError;
+    use crate::market_data::types::{
+        HistoricalRange, LatestBar, LatestBarRequest, PriceBar, TypedIdentifier,
+    };
+
+    /// A `MockMarketDataProvider` driven by per-method response maps.
+    ///
+    /// Implements the trait contract of FR-001 of spec 017; used to
+    /// exercise the registry's failover behavior offline.
+    pub struct MockMarketDataProvider {
+        pub id: String,
+        pub display: String,
+        pub schemes: Vec<String>,
+        pub priority: i32,
+        pub enabled: bool,
+        pub latest: HashMap<String, Result<LatestBar, MarketDataProviderError>>,
+    }
+
+    impl MockMarketDataProvider {
+        /// Constructs a mock provider with the given identity.
+        ///
+        /// Implements FR-001 of spec 017.
+        pub fn new(id: &str, schemes: &[&str], priority: i32) -> Self {
+            Self {
+                id: id.to_string(),
+                display: id.to_string(),
+                schemes: schemes.iter().map(|s| s.to_string()).collect(),
+                priority,
+                enabled: true,
+                latest: HashMap::new(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl MarketDataProvider for MockMarketDataProvider {
+        fn source_id(&self) -> &str {
+            &self.id
+        }
+        fn display_name(&self) -> &str {
+            &self.display
+        }
+        fn supported_schemes(&self) -> &[String] {
+            &self.schemes
+        }
+        fn enabled(&self) -> bool {
+            self.enabled
+        }
+        fn priority(&self) -> i32 {
+            self.priority
+        }
+
+        async fn get_latest_bar(
+            &self,
+            request: LatestBarRequest,
+        ) -> Result<LatestBar, MarketDataProviderError> {
+            let key = format!("{}:{}", request.identifier.scheme, request.identifier.value);
+            match self.latest.get(&key) {
+                Some(r) => match r {
+                    Ok(bar) => Ok(bar.clone()),
+                    Err(e) => Err(e.clone()),
+                },
+                None => Err(MarketDataProviderError::NotFound(format!(
+                    "mock {key} not configured"
+                ))),
+            }
+        }
+
+        async fn get_historical_range(
+            &self,
+            _request: crate::market_data::types::HistoricalRangeRequest,
+        ) -> Result<HistoricalRange, MarketDataProviderError> {
+            Err(MarketDataProviderError::Unsupported(
+                "mock: historical_range not implemented".into(),
+            ))
+        }
+
+        async fn lookup_ticker(
+            &self,
+            _request: TickerLookupRequest,
+        ) -> Result<TickerLookupResult, MarketDataProviderError> {
+            Err(MarketDataProviderError::Unsupported(
+                "mock: lookup not implemented".into(),
+            ))
+        }
+    }
+
+    fn make_bar(source: &str) -> LatestBar {
+        use chrono::NaiveDate;
+        use rust_decimal::Decimal;
+        LatestBar {
+            bar: PriceBar {
+                as_of_date: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+                open: Decimal::new(100, 0),
+                high: Decimal::new(101, 0),
+                low: Decimal::new(99, 0),
+                close: Decimal::new(100, 0),
+                adjclose: Decimal::new(100, 0),
+                volume: 1_000_000,
+            },
+            knowledge_date: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+            source_id: source.to_string(),
+        }
+    }
+
+    #[test]
+    fn registry_new_rejects_duplicate_source_id() {
+        let a: Arc<dyn MarketDataProvider + Send + Sync> =
+            Arc::new(MockMarketDataProvider::new("a", &["TICKER"], 10));
+        let b: Arc<dyn MarketDataProvider + Send + Sync> =
+            Arc::new(MockMarketDataProvider::new("a", &["TICKER"], 20));
+        let result = DataSourceRegistry::new(vec![a, b]);
+        assert!(matches!(
+            result,
+            Err(MarketDataProviderError::Validation(ref msg)) if msg.contains("duplicate")
+        ));
+    }
+
+    #[test]
+    fn enumerate_lists_by_source_id_asc() {
+        let a: Arc<dyn MarketDataProvider + Send + Sync> =
+            Arc::new(MockMarketDataProvider::new("beta", &["TICKER"], 30));
+        let b: Arc<dyn MarketDataProvider + Send + Sync> =
+            Arc::new(MockMarketDataProvider::new("alpha", &["ISIN"], 10));
+        let registry = DataSourceRegistry::new(vec![a, b]).expect("registry");
+        let sources = registry.enumerate_sources();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].source_id, "alpha");
+        assert_eq!(sources[1].source_id, "beta");
+    }
+
+    #[tokio::test]
+    async fn get_latest_bar_walks_in_priority_order() {
+        let mut a = MockMarketDataProvider::new("a_low_priority", &["TICKER"], 20);
+        a.latest
+            .insert("TICKER:AAPL".to_string(), Ok(make_bar("a_low_priority")));
+        let mut b = MockMarketDataProvider::new("b_high_priority", &["TICKER"], 10);
+        b.latest
+            .insert("TICKER:AAPL".to_string(), Ok(make_bar("b_high_priority")));
+        let a_arc: Arc<dyn MarketDataProvider + Send + Sync> = Arc::new(a);
+        let b_arc: Arc<dyn MarketDataProvider + Send + Sync> = Arc::new(b);
+        let registry = DataSourceRegistry::new(vec![a_arc, b_arc]).expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let bar = registry.get_latest_bar(request).await.expect("bar");
+        assert_eq!(bar.source_id, "b_high_priority");
+    }
+
+    #[tokio::test]
+    async fn transient_error_falls_over_to_next_provider() {
+        let mut a = MockMarketDataProvider::new("a_transient", &["TICKER"], 10);
+        a.latest.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Transient(
+                "upstream timeout".into(),
+            )),
+        );
+        let mut b = MockMarketDataProvider::new("b_ok", &["TICKER"], 20);
+        b.latest
+            .insert("TICKER:AAPL".to_string(), Ok(make_bar("b_ok")));
+        let a_arc: Arc<dyn MarketDataProvider + Send + Sync> = Arc::new(a);
+        let b_arc: Arc<dyn MarketDataProvider + Send + Sync> = Arc::new(b);
+        let registry = DataSourceRegistry::new(vec![a_arc, b_arc]).expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let bar = registry.get_latest_bar(request).await.expect("bar");
+        assert_eq!(bar.source_id, "b_ok");
+    }
+
+    #[tokio::test]
+    async fn not_found_is_final_no_fallover() {
+        let mut a = MockMarketDataProvider::new("a_nf", &["TICKER"], 10);
+        a.latest.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::NotFound("AAPL not in a".into())),
+        );
+        let mut b = MockMarketDataProvider::new("b_ok", &["TICKER"], 20);
+        b.latest
+            .insert("TICKER:AAPL".to_string(), Ok(make_bar("b_ok")));
+        let a_arc: Arc<dyn MarketDataProvider + Send + Sync> = Arc::new(a);
+        let b_arc: Arc<dyn MarketDataProvider + Send + Sync> = Arc::new(b);
+        let registry = DataSourceRegistry::new(vec![a_arc, b_arc]).expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let err = registry.get_latest_bar(request).await.expect_err("err");
+        assert!(matches!(err, MarketDataProviderError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn no_source_supports_scheme_returns_not_found() {
+        let a: Arc<dyn MarketDataProvider + Send + Sync> =
+            Arc::new(MockMarketDataProvider::new("a", &["ISIN"], 10));
+        let registry = DataSourceRegistry::new(vec![a]).expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let err = registry.get_latest_bar(request).await.expect_err("err");
+        assert!(
+            matches!(err, MarketDataProviderError::NotFound(ref msg) if msg.contains("no enabled source"))
+        );
+    }
+
+    #[tokio::test]
+    async fn every_source_returns_per_source_map() {
+        let mut a = MockMarketDataProvider::new("a", &["TICKER"], 10);
+        a.latest
+            .insert("TICKER:AAPL".to_string(), Ok(make_bar("a")));
+        let mut b = MockMarketDataProvider::new("b", &["TICKER"], 20);
+        b.latest.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::NotFound("not in b".into())),
+        );
+        let a_arc: Arc<dyn MarketDataProvider + Send + Sync> = Arc::new(a);
+        let b_arc: Arc<dyn MarketDataProvider + Send + Sync> = Arc::new(b);
+        let registry = DataSourceRegistry::new(vec![a_arc, b_arc]).expect("registry");
+        let request = LatestBarRequest::now(TypedIdentifier::new("TICKER", "AAPL"));
+        let map = registry.every_source_latest_bar(request).await;
+        assert_eq!(map.len(), 2);
+        assert!(map["a"].is_ok());
+        assert!(map["b"].is_err());
+    }
+
+    #[test]
+    fn scheme_matches_handles_wildcards() {
+        assert!(scheme_matches(&["TICKER".to_string()], "TICKER"));
+        assert!(!scheme_matches(&["TICKER".to_string()], "ISIN"));
+        assert!(scheme_matches(&["TICKER:*".to_string()], "TICKER:XNAS"));
+        assert!(!scheme_matches(&["TICKER:*".to_string()], "TICKER"));
+        assert!(scheme_matches(&["*".to_string()], "anything"));
+    }
+
+    /// Builds a registry with a single source that answers `TICKER`.
+    ///
+    /// Shared with the `refresh` module's identifier-picker tests.
+    pub(crate) fn registry_with_ticker_source() -> DataSourceRegistry {
+        let provider: Arc<dyn MarketDataProvider + Send + Sync> =
+            Arc::new(MockMarketDataProvider::new("mock", &["TICKER"], 10));
+        DataSourceRegistry::new(vec![provider]).expect("registry")
+    }
+
+    // Suppress unused-import warning when #[cfg(test)] is dormant
+    #[allow(dead_code)]
+    fn _unused(_m: &Mutex<()>, _cfg: &DataSourceConfig, _u: &Utc) {}
+}

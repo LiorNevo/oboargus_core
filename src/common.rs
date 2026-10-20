@@ -25,6 +25,7 @@
 
 #![allow(dead_code)]
 
+use sqlx::AssertSqlSafe;
 use sqlx::PgPool;
 
 /// All high-level tables, in dependency order.
@@ -92,8 +93,9 @@ pub async fn cleanup(pool: &PgPool) {
         }
     };
     for table in TABLES {
+        // Safe: TABLES is a fixed internal constant, not user input
         let q = format!("TRUNCATE TABLE {} RESTART IDENTITY CASCADE", table);
-        if let Err(e) = sqlx::query(&q).execute(&mut *tx).await {
+        if let Err(e) = sqlx::query(AssertSqlSafe(q)).execute(&mut *tx).await {
             eprintln!("db-cleanup: {}: {}", table, e);
         }
     }

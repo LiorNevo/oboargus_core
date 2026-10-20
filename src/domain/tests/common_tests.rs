@@ -68,10 +68,11 @@ async fn tx_pool_from_with_test_url_truncates_and_yields_a_usable_pool() {
         "issuer_reference_data",
         "portfolio_reference_data",
     ] {
-        let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
-            .fetch_one(&pool)
-            .await
-            .expect("count");
+        let n: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+                .fetch_one(&pool)
+                .await
+                .expect("count");
         assert_eq!(n, 0, "table {table} should be empty after fixture");
     }
     guard.cleanup().await;
@@ -202,7 +203,7 @@ async fn url_for_scratch_db(base_url: &str) -> String {
             .expect("exists check");
     if !exists {
         let sql = format!("CREATE DATABASE {scratch_db}");
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .execute(&mut admin)
             .await
             .expect("create scratch db");
@@ -220,15 +221,17 @@ async fn drop_scratch_db(base_url: &str, _scratch_url: &str) {
     let mut admin = sqlx::PgConnection::connect(&admin_url)
         .await
         .expect("admin connect");
-    let _ = sqlx::query(&format!(
+    let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
          WHERE datname = '{scratch_db}' AND pid <> pg_backend_pid()"
-    ))
+    )))
     .execute(&mut admin)
     .await;
-    let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS {scratch_db}"))
-        .execute(&mut admin)
-        .await;
+    let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP DATABASE IF EXISTS {scratch_db}"
+    )))
+    .execute(&mut admin)
+    .await;
 }
 
 /// Install a deferred foreign-key constraint on the scratch

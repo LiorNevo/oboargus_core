@@ -58,6 +58,27 @@ pub struct ReferenceDataId(pub Uuid);
 /// Implements FR-023 of spec 016-implement-domain-model.
 pub struct IdentifierId(pub Uuid);
 
+/// A typed id for a `data_source_refresh_runs` audit row.
+/// Implements FR-007 of spec 017-yahoo-data-source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(transparent)]
+#[serde(transparent)]
+pub struct DataSourceRefreshRunId(pub Uuid);
+
+/// A typed id for a `data_source_reconciliation_audits` audit row.
+/// Implements FR-022 of spec 017-yahoo-data-source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(transparent)]
+#[serde(transparent)]
+pub struct ReconciliationAuditId(pub Uuid);
+
+/// A typed id for a `data_sources` configuration row.
+/// Implements FR-002 of spec 017-yahoo-data-source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(transparent)]
+#[serde(transparent)]
+pub struct DataSourceId(pub Uuid);
+
 /// A trait implemented by all entity-id newtypes. Provides a uniform
 /// constructor and a uniform accessor.
 pub trait DomainId: Copy + Eq {
@@ -99,6 +120,9 @@ impl_domain_id!(EventId);
 impl_domain_id!(IssuerId);
 impl_domain_id!(ReferenceDataId);
 impl_domain_id!(IdentifierId);
+impl_domain_id!(DataSourceRefreshRunId);
+impl_domain_id!(ReconciliationAuditId);
+impl_domain_id!(DataSourceId);
 
 /// Generate a fresh `Uuid` v4.
 /// Implements FR-008 of spec 016-implement-domain-model.

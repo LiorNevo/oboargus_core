@@ -16,6 +16,7 @@
 //! a helper from this module, print a summary line.
 
 use crate::domain::DomainError;
+use sqlx::AssertSqlSafe;
 use sqlx::Connection;
 use sqlx::PgPool;
 use sqlx::migrate::MigrateError;
@@ -103,13 +104,12 @@ pub fn resolve_test_url() -> Result<String, DomainError> {
 pub async fn truncate_test_tables(pool: &PgPool) -> Result<(), DomainError> {
     let mut tx = pool.begin().await?;
     for table in TABLES {
-        sqlx::query(&format!(
-            "TRUNCATE TABLE {} RESTART IDENTITY CASCADE",
-            table
-        ))
-        .execute(&mut *tx)
-        .await
-        .map_err(DomainError::Infrastructure)?;
+        let query = format!("TRUNCATE TABLE {} RESTART IDENTITY CASCADE", table);
+        // Safe: TABLES is a fixed internal constant, not user input
+        sqlx::query(AssertSqlSafe(query))
+            .execute(&mut *tx)
+            .await
+            .map_err(DomainError::Infrastructure)?;
     }
     tx.commit().await?;
     Ok(())
@@ -130,7 +130,9 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), DomainError> {
 pub async fn count_high_level_rows(pool: &PgPool) -> Result<i64, sqlx::Error> {
     let mut total: i64 = 0;
     for table in CHECK_TABLES {
-        let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", table))
+        // Safe: CHECK_TABLES is a fixed internal constant, not user input
+        let query = format!("SELECT COUNT(*) FROM {}", table);
+        let n: i64 = sqlx::query_scalar(AssertSqlSafe(query))
             .fetch_one(pool)
             .await?;
         total += n;
@@ -167,8 +169,9 @@ pub async fn ensure_test_database(admin_url: &str, test_db: &str) -> Result<bool
     if exists {
         return Ok(false);
     }
+    // Safe: test_db is validated by validate_test_db_name before this point
     let sql = format!("CREATE DATABASE {}", test_db);
-    sqlx::query(&sql).execute(&mut admin).await?;
+    sqlx::query(AssertSqlSafe(sql)).execute(&mut admin).await?;
     Ok(true)
 }
 
@@ -444,13 +447,13 @@ mod tests {
             let mut admin_conn = sqlx::PgConnection::connect(&admin)
                 .await
                 .expect("admin connect");
-            let _ = sqlx::query(&format!(
+            let _ = sqlx::query(AssertSqlSafe(format!(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
                  WHERE datname = '{scratch}' AND pid <> pg_backend_pid()"
-            ))
+            )))
             .execute(&mut admin_conn)
             .await;
-            let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS {scratch}"))
+            let _ = sqlx::query(AssertSqlSafe(format!("DROP DATABASE IF EXISTS {scratch}")))
                 .execute(&mut admin_conn)
                 .await;
         });

@@ -12,6 +12,9 @@ pub mod decimal;
 /// The high-level financial domain model (see `specs/015-database-uml-domains/spec.md`).
 pub mod domain;
 
+/// Source-agnostic market data interface (see `specs/017-yahoo-data-source/spec.md`).
+pub mod market_data;
+
 /// Helpers shared by the binary entrypoints in `src/bin/`.
 ///
 /// Extracted from `db_cleanup.rs`, `init_test_db.rs`, and
