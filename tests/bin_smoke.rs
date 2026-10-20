@@ -23,9 +23,22 @@ use std::process::Command;
 /// set by cargo for every integration test that uses a binary built
 /// by the same package.
 fn run_binary(name: &str, args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
+    run_binary_with_env(name, args, &[])
+}
+
+/// Run a binary built by cargo, overriding the given environment
+/// variables for the child process only.
+fn run_binary_with_env(
+    name: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> std::io::Result<std::process::ExitStatus> {
     let bin = std::env::var(format!("CARGO_BIN_EXE_{name}"))
         .unwrap_or_else(|_| panic!("CARGO_BIN_EXE_{name} not set; cargo did not build it"));
-    Command::new(bin).args(args).status()
+    Command::new(bin)
+        .args(args)
+        .envs(env.iter().copied())
+        .status()
 }
 
 /// Skip if no test database is configured.
@@ -35,28 +48,30 @@ fn db_env_present() -> bool {
         || std::env::var("POSTGRES_HOST").is_ok()
 }
 
-#[test]
-fn check_empty_binary_succeeds_on_an_empty_database() {
+#[tokio::test]
+async fn check_empty_binary_succeeds_on_an_empty_database() {
     // The check must run against the TEST database. Asserting on the
     // production database from a test would be wrong on two counts: the
     // suite does not own that data, and it must never truncate it.
-    if std::env::var("TEST_DATABASE_URL").is_err() {
+    let Some(test_url) = std::env::var("TEST_DATABASE_URL").ok() else {
         return;
-    }
-    // `db_cleanup` applies the migrations and truncates the test
+    };
+    // The shared fixture applies the migrations and truncates the test
     // database, so the check that follows starts from a known-empty
-    // database with a current schema — and does not depend on the
-    // order in which the test binaries happen to run.
-    let cleanup = run_binary("db_cleanup", &[]).expect("spawn db_cleanup");
-    assert!(
-        cleanup.success(),
-        "db_cleanup should exit 0 so the test database is empty (got {cleanup:?})"
-    );
-    let status = run_binary("check_empty", &[]).expect("spawn check_empty");
+    // database with a current schema — and does not depend on the order
+    // in which the test binaries happen to run.
+    let Some((_pool, guard)) = obolargus_core::common::tx_pool().await else {
+        return;
+    };
+    // Point the binary at the test database explicitly, so the
+    // assertion does not depend on which variable the binary prefers.
+    let status = run_binary_with_env("check_empty", &[], &[("DATABASE_URL", test_url.as_str())])
+        .expect("spawn check_empty");
     assert!(
         status.success(),
         "check_empty on an empty database should exit 0 (got {status:?})"
     );
+    guard.cleanup().await;
 }
 
 #[test]
