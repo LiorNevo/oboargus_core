@@ -79,13 +79,27 @@ fn identifier_entities_have_five_fields_each() {
 }
 
 #[test]
-fn fourteen_relationships() {
+fn rule_entity_has_seven_fields() {
     let desc = model_description();
-    assert_eq!(desc.relationships.len(), 14); // 11 original + issuer parent_of + 2 identified_by
+    let r = desc
+        .entities
+        .iter()
+        .find(|e| e.name == "Rule")
+        .expect("Rule");
+    assert_eq!(r.fields.len(), 7);
 }
 
 #[test]
-fn thirteen_invariants() {
+fn fifteen_relationships() {
     let desc = model_description();
-    assert_eq!(desc.invariants.len(), 13); // 11 original + issuer DAG acyclicity + identifier uniqueness
+    // 11 original + issuer parent_of + 2 identified_by + governed_by
+    assert_eq!(desc.relationships.len(), 15);
+}
+
+#[test]
+fn sixteen_invariants() {
+    let desc = model_description();
+    // 11 original + issuer DAG acyclicity + identifier uniqueness
+    // + 3 rule invariants
+    assert_eq!(desc.invariants.len(), 16);
 }

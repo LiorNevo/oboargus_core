@@ -58,13 +58,19 @@ pub struct ReferenceDataId(pub Uuid);
 /// Implements FR-023 of spec 016-implement-domain-model.
 pub struct IdentifierId(pub Uuid);
 
+/// A typed id for a `Rule` record — a rule expression that governs a
+/// portfolio. Implements FR-030 of spec 016-implement-domain-model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(transparent)]
+#[serde(transparent)]
+pub struct RuleId(pub Uuid);
+
 /// A typed id for a `data_source_refresh_runs` audit row.
 /// Implements FR-007 of spec 017-yahoo-data-source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(transparent)]
 #[serde(transparent)]
 pub struct DataSourceRefreshRunId(pub Uuid);
-
 /// A typed id for a `data_source_reconciliation_audits` audit row.
 /// Implements FR-022 of spec 017-yahoo-data-source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
@@ -120,6 +126,7 @@ impl_domain_id!(EventId);
 impl_domain_id!(IssuerId);
 impl_domain_id!(ReferenceDataId);
 impl_domain_id!(IdentifierId);
+impl_domain_id!(RuleId);
 impl_domain_id!(DataSourceRefreshRunId);
 impl_domain_id!(ReconciliationAuditId);
 impl_domain_id!(DataSourceId);

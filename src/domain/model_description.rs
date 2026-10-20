@@ -430,6 +430,49 @@ pub fn model_description() -> ModelDescription {
                     },
                 ],
             },
+            // US9 (2026-10-20): portfolio rules. A shared rule catalog —
+            // current-state configuration, not dual-temporal facts, so no
+            // as_of_date / knowledge_date.
+            EntityDescription {
+                name: "Rule",
+                fields: vec![
+                    FieldDescription {
+                        name: "id",
+                        type_domain: "uuid",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "name",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "category",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "expression",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "description",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "created_at",
+                        type_domain: "timestamp",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "created_by",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                ],
+            },
         ],
         relationships: vec![
             RelationshipDescription {
@@ -532,6 +575,15 @@ pub fn model_description() -> ModelDescription {
                 cardinality_from: "1",
                 cardinality_to: "0..*",
             },
+            // US9 (2026-10-20): portfolio rules — many-to-many, because a
+            // rule is shared and governs every portfolio it is attached to.
+            RelationshipDescription {
+                from: "Portfolio",
+                to: "Rule",
+                label: "governed_by",
+                cardinality_from: "0..*",
+                cardinality_to: "0..*",
+            },
         ],
         invariants: vec![
             "Portfolio graph is a DAG.",
@@ -550,6 +602,11 @@ pub fn model_description() -> ModelDescription {
             // US8 (2026-10-18): identifier uniqueness (Invariant 9 / FR-032
             // of the predecessor spec)
             "An external identifier names at most one subject within its domain.",
+            // US9 (2026-10-20): portfolio rules (Invariants 14, 15 and 16 of
+            // the predecessor spec)
+            "Rule names are unique across the rule catalog.",
+            "Rules are not inherited from ancestor portfolios.",
+            "A portfolio carries a given rule at most once.",
         ],
     }
 }

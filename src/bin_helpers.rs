@@ -30,6 +30,8 @@ pub const TABLES: &[&str] = &[
     "portfolio_reference_data",
     "asset_identifiers",
     "issuer_identifiers",
+    "rules",
+    "portfolio_rules",
     "positions",
     "events",
     "data_source_reconciliation_audits",
@@ -44,10 +46,14 @@ pub const TABLES: &[&str] = &[
 /// `*_identifiers` tables (which `check_empty` does not consider
 /// part of the high-level dataset — kept for backwards
 /// compatibility with the original `check_empty` table list).
+/// `rules` and `portfolio_rules` ARE counted: the rule catalog and its
+/// portfolio links are high-level state (US9).
 pub const CHECK_TABLES: &[&str] = &[
     "asset_reference_data",
     "issuer_reference_data",
     "portfolio_reference_data",
+    "rules",
+    "portfolio_rules",
     "positions",
     "events",
     "assets",

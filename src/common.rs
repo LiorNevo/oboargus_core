@@ -44,6 +44,8 @@ const TABLES: &[&str] = &[
     "portfolio_reference_data",
     "asset_identifiers",
     "issuer_identifiers",
+    "rules",
+    "portfolio_rules",
     "positions",
     "events",
     // Market-data audit tables. `data_source_reconciliation_audits`

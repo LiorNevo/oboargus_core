@@ -1,9 +1,12 @@
 //! High-level financial domain model.
 //!
-//! Implements the 8 entities, 12 relationships, and 12 invariants defined
+//! Implements the 11 entities, 15 relationships, and 16 invariants defined
 //! in `specs/015-database-uml-domains/spec.md` (the 12th relationship and
-//! 12th invariant are the issuer DAG added in US2b). See the spec for the
-//! model and `specs/016-implement-domain-model/spec.md` for the implementation
+//! 12th invariant are the issuer DAG added in US2b; the 13th and 14th
+//! relationships and the 13th invariant are the external identifiers added
+//! in US8; the 15th relationship and the 14th, 15th and 16th invariants are
+//! the portfolio rules added in US9). See the spec for the model and
+//! `specs/016-implement-domain-model/spec.md` for the implementation
 //! contract.
 //!
 //! Module organization: one submodule per high-level entity, plus shared
@@ -24,6 +27,7 @@ pub mod model_description;
 pub mod portfolio;
 pub mod portfolio_reference_data;
 pub mod position;
+pub mod rule;
 pub mod seed;
 
 #[cfg(test)]
@@ -35,4 +39,5 @@ pub use model_description::{
     EntityDescription, FieldDescription, ModelDescription, RelationshipDescription,
     model_description,
 };
+pub use rule::RuleCategory;
 pub use seed::{SeedSummary, seed_canonical_dataset};

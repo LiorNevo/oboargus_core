@@ -1,18 +1,18 @@
 //! Invariants registry. Implements US5 / FR-008.
 //!
-//! Each test in this file is a thin wrapper that documents one of the 13
+//! Each test in this file is a thin wrapper that documents one of the 16
 //! invariants from the predecessor spec (11 original + issuer DAG acyclicity
-//! added in US2b + external-identifier uniqueness added in US8). The actual
-//! assertions live in the per-user-story test files (portfolio/tests,
-//! asset/tests, etc.); this file is the registry that lists them all in one
-//! place, so a reviewer can confirm "every invariant is tested" by reading
-//! this file alone.
+//! added in US2b + external-identifier uniqueness added in US8 + the three
+//! rule invariants added in US9). The actual assertions live in the
+//! per-user-story test files (portfolio/tests, asset/tests, etc.); this file
+//! is the registry that lists them all in one place, so a reviewer can
+//! confirm "every invariant is tested" by reading this file alone.
 //!
 //! ## Mutation testing workflow
 //!
 //! To verify that each invariant test actually catches a violation, a
 //! reviewer can introduce a temporary bug in the implementation and confirm
-//! that the relevant test fails. The 13 mutations to try, one per invariant:
+//! that the relevant test fails. The 16 mutations to try, one per invariant:
 //!
 //! 1. **portfolio_dag_acyclicity** — in `portfolio::dag::detect_cycle`, change
 //!    the query to always return `None`. The cycle test fails.
@@ -45,6 +45,18 @@
 //!     still catch it and the mapping in `create.rs` turns it back into the
 //!     typed error; to see the test fail, also drop the mapping). The
 //!     `duplicate_identifier_on_second_asset_is_rejected` test fails.
+//! 14. **rule_name_uniqueness** — in `rule::create`, remove the `claimant_of`
+//!     pre-insert check (and, to see the test fail, also drop the
+//!     unique-violation mapping). The
+//!     `duplicate_rule_name_in_the_catalog_is_rejected` test fails.
+//! 15. **rules_not_inherited_from_ancestors** — in
+//!     `rule::read::list_rules_for_portfolio`, replace the `portfolio_rules`
+//!     join with a recursive ancestor lookup. The
+//!     `rules_are_not_inherited_from_ancestor_portfolios` test fails.
+//! 16. **rule_attachment_uniqueness** — in `rule::attach::attach_rule_to_portfolio`,
+//!     remove the `is_attached` pre-insert check (and, to see the test fail,
+//!     also drop the primary-key-violation mapping). The
+//!     `attaching_the_same_rule_twice_is_rejected` test fails.
 
 #![allow(unused_imports)]
 
@@ -215,5 +227,45 @@ fn invariant_13_identifier_uniqueness() {
             .iter()
             .any(|i| i.contains("identifier names at most one subject")),
         "identifier uniqueness invariant not found in model description"
+    );
+}
+
+/// US9: Invariant 14 — rule names are unique across the rule catalog. Tested
+/// in `rule::tests::duplicate_rule_name_in_the_catalog_is_rejected` and
+/// `rule::tests::update_rule_rejects_a_duplicate_name`.
+#[test]
+fn invariant_14_rule_name_uniqueness() {
+    let desc = model_description();
+    assert!(
+        desc.invariants
+            .iter()
+            .any(|i| i.contains("Rule names are unique across the rule catalog")),
+        "rule-name uniqueness invariant not found in model description"
+    );
+}
+
+/// US9: Invariant 15 — rules are not inherited from ancestor portfolios.
+/// Tested in `rule::tests::rules_are_not_inherited_from_ancestor_portfolios`.
+#[test]
+fn invariant_15_rules_not_inherited_from_ancestors() {
+    let desc = model_description();
+    assert!(
+        desc.invariants
+            .iter()
+            .any(|i| i.contains("Rules are not inherited from ancestor portfolios")),
+        "rule non-inheritance invariant not found in model description"
+    );
+}
+
+/// US9: Invariant 16 — a portfolio carries a given rule at most once. Tested
+/// in `rule::tests::attaching_the_same_rule_twice_is_rejected`.
+#[test]
+fn invariant_16_rule_attachment_uniqueness() {
+    let desc = model_description();
+    assert!(
+        desc.invariants
+            .iter()
+            .any(|i| i.contains("A portfolio carries a given rule at most once")),
+        "rule attachment uniqueness invariant not found in model description"
     );
 }

@@ -33,6 +33,10 @@ pub struct SeedSummary {
     pub reference_data_records_created: usize,
     /// External identifiers registered (US8, added 2026-10-18).
     pub identifiers_created: usize,
+    /// Portfolio rules registered (US9, added 2026-10-20).
+    pub rules_created: usize,
+    /// Portfolio→rule attachments created (US9, added 2026-10-20).
+    pub rule_attachments_created: usize,
 }
 
 /// Seed the database with a canonical dataset. Idempotent: re-running it on
@@ -59,6 +63,16 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
             .await
             .map_err(DomainError::Infrastructure)?;
         summary.portfolios_created = portfolio_count as usize;
+        let rule_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM rules")
+            .fetch_one(pool)
+            .await
+            .map_err(DomainError::Infrastructure)?;
+        summary.rules_created = rule_count as usize;
+        let attachment_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM portfolio_rules")
+            .fetch_one(pool)
+            .await
+            .map_err(DomainError::Infrastructure)?;
+        summary.rule_attachments_created = attachment_count as usize;
         return Ok(summary);
     }
 
@@ -257,6 +271,79 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
         summary.identifiers_created += 1;
     }
 
+    // Portfolio rules (US9, 2026-10-20): a shared rule catalog. Human-readable
+    // rules, one per well-known effect category, so the seed exercises the
+    // categorization. The expressions are real rules in the LX language — they
+    // are parsed (not evaluated) when the rule is written.
+    use crate::domain::rule::attach::attach_rule_to_portfolio;
+    use crate::domain::rule::create::create_rule;
+    use crate::domain::rule::entity::{NewRule, RuleCategory};
+
+    let benchmark_check = create_rule(
+        pool,
+        NewRule {
+            name: "benchmark check".to_string(),
+            category: RuleCategory::PORTFOLIO_DATA.to_string(),
+            expression: r#"{"get": {"selector": "benchmark"}}"#.to_string(),
+            description: "The portfolio must declare an equity benchmark.".to_string(),
+            created_by: "seed".to_string(),
+        },
+    )
+    .await?;
+    summary.rules_created += 1;
+
+    let transfer_watch = create_rule(
+        pool,
+        NewRule {
+            name: "transfer volume watch".to_string(),
+            category: RuleCategory::EVENTS.to_string(),
+            expression: r#"{"filter": {"data": {"get": {"selector": "events"}}, "condition": {">": [{"get": {"selector": "quantity_delta"}}, 1000]}}}"#.to_string(),
+            description: "Flag any single transfer that moves more than 1,000 units.".to_string(),
+            created_by: "seed".to_string(),
+        },
+    )
+    .await?;
+    summary.rules_created += 1;
+
+    // The concentration cap is SHARED: it governs both the brokerage
+    // portfolio and the retirement portfolio, from one rule record.
+    let concentration_cap = create_rule(
+        pool,
+        NewRule {
+            name: "single-asset concentration cap".to_string(),
+            category: RuleCategory::ALL_ASSETS.to_string(),
+            expression: r#"{"filter": {"data": {"get": {"selector": "positions"}}, "condition": {">": [{"get": {"selector": "weight_pct"}}, 25]}}}"#.to_string(),
+            description: "No single asset may exceed 25% of the portfolio.".to_string(),
+            created_by: "seed".to_string(),
+        },
+    )
+    .await?;
+    summary.rules_created += 1;
+
+    let drift_watch = create_rule(
+        pool,
+        NewRule {
+            name: "position drift watch".to_string(),
+            category: RuleCategory::POSITIONS.to_string(),
+            expression: r#"{"filter": {"data": {"get": {"selector": "positions"}}, "condition": {">": [{"get": {"selector": "weight_change_pct"}}, 5]}}}"#.to_string(),
+            description: "Flag positions whose weight moved by more than 5%.".to_string(),
+            created_by: "seed".to_string(),
+        },
+    )
+    .await?;
+    summary.rules_created += 1;
+
+    for (portfolio_id, rule) in [
+        (total.id(), &benchmark_check),
+        (total.id(), &transfer_watch),
+        (brokerage.id(), &concentration_cap),
+        (retirement.id(), &concentration_cap),
+        (retirement.id(), &drift_watch),
+    ] {
+        attach_rule_to_portfolio(pool, portfolio_id, rule.id()).await?;
+        summary.rule_attachments_created += 1;
+    }
+
     let _ = (
         AssetId::from_uuid(new_uuid()),
         IssuerId::from_uuid(new_uuid()),
@@ -266,7 +353,6 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
 
     Ok(summary)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,8 +370,55 @@ mod tests {
                 portfolios_created: 0,
                 events_created: 0,
                 reference_data_records_created: 0,
-                identifiers_created: 0
+                identifiers_created: 0,
+                rules_created: 0,
+                rule_attachments_created: 0
             }
         );
+    }
+
+    /// The canonical seed writes a shared rule catalog and attaches the
+    /// rules to the seeded portfolios — including one rule shared by two
+    /// portfolios (US9). Gated by `DATABASE_URL`.
+    #[tokio::test]
+    async fn seed_creates_a_shared_rule_catalog() {
+        use crate::common::tx_pool;
+        let Some((pool, guard)) = tx_pool().await else {
+            return;
+        };
+        let summary = super::seed_canonical_dataset(&pool).await.expect("seed");
+        assert_eq!(summary.rules_created, 4, "the seed writes four rules");
+        assert_eq!(
+            summary.rule_attachments_created, 5,
+            "the seed makes five attachments — one rule governs two portfolios"
+        );
+
+        // Every seeded rule is categorized by one of the well-known effects.
+        let rules: Vec<crate::domain::rule::entity::Rule> = sqlx::query_as(
+            "SELECT id, name, category, expression, description, created_at, created_by \
+             FROM rules",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("list rules");
+        assert_eq!(rules.len(), 4);
+        let mut categories: Vec<&str> = rules.iter().map(|r| r.category.as_str()).collect();
+        categories.sort_unstable();
+        assert_eq!(
+            categories,
+            vec!["all_assets", "events", "portfolio_data", "positions"]
+        );
+
+        // The concentration cap is shared: it is attached to two portfolios.
+        let shared: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM portfolio_rules pr \
+             JOIN rules r ON r.id = pr.rule_id WHERE r.name = 'single-asset concentration cap'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count attachments");
+        assert_eq!(shared, 2, "the concentration cap governs two portfolios");
+
+        guard.cleanup().await;
     }
 }

@@ -18,10 +18,14 @@ parent Obolargus repository; see `specs/architecture/` for the system design and
 `specs/016-implement-domain-model/spec.md`): `Portfolio` (a DAG — any level
 may carry accounting), `Issuer` (its own parent/child DAG of legal
 entities), `Asset`, `Position` (derived from events), `Event` (immutable,
-append-only), the three dual-temporal reference-data entities, and the
+append-only), the three dual-temporal reference-data entities, the
 external-identifier entities `AssetIdentifier` / `IssuerIdentifier` (ISIN,
 ticker, CUSIP, Bloomberg ID, LEI, ... — indexed `(scheme, value)` keys with
-an open scheme vocabulary). The module is the only sanctioned way to read
+an open scheme vocabulary), and `Rule` (a rule expression in a **shared**
+rule catalog, categorized by the effect it has — `all_assets`,
+`portfolio_data`, `positions`, `events`, ... — with an open category
+vocabulary; one rule can govern any number of portfolios). The module is the
+only sanctioned way to read
 and write the model; `domain::model_description()` returns the
 machine-readable description of every entity, field, aggregate,
 relationship, and invariant.
