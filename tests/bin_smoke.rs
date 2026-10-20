@@ -37,9 +37,21 @@ fn db_env_present() -> bool {
 
 #[test]
 fn check_empty_binary_succeeds_on_an_empty_database() {
-    if !db_env_present() {
+    // The check must run against the TEST database. Asserting on the
+    // production database from a test would be wrong on two counts: the
+    // suite does not own that data, and it must never truncate it.
+    if std::env::var("TEST_DATABASE_URL").is_err() {
         return;
     }
+    // `db_cleanup` applies the migrations and truncates the test
+    // database, so the check that follows starts from a known-empty
+    // database with a current schema — and does not depend on the
+    // order in which the test binaries happen to run.
+    let cleanup = run_binary("db_cleanup", &[]).expect("spawn db_cleanup");
+    assert!(
+        cleanup.success(),
+        "db_cleanup should exit 0 so the test database is empty (got {cleanup:?})"
+    );
     let status = run_binary("check_empty", &[]).expect("spawn check_empty");
     assert!(
         status.success(),

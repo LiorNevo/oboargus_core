@@ -137,9 +137,30 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), DomainError> {
 /// Return the total row count across every high-level table
 /// listed in [`CHECK_TABLES`]. Used by the `check_empty` binary.
 pub async fn count_high_level_rows(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    count_rows_in(pool, CHECK_TABLES).await
+}
+
+/// Return the total row count across the given tables.
+///
+/// A table that does not exist yet — a database that predates the
+/// migration which created it — contributes zero rows rather than
+/// failing the whole count. Without this, adding a table to the
+/// high-level model makes `check_empty` fail with a raw
+/// `relation does not exist` error against any database that has not
+/// been migrated yet, instead of reporting what it actually knows.
+pub async fn count_rows_in(pool: &PgPool, tables: &[&str]) -> Result<i64, sqlx::Error> {
     let mut total: i64 = 0;
-    for table in CHECK_TABLES {
-        // Safe: CHECK_TABLES is a fixed internal constant, not user input
+    for table in tables {
+        // `to_regclass` returns NULL (rather than erroring) for a
+        // relation that does not exist.
+        let exists: Option<String> = sqlx::query_scalar("SELECT to_regclass($1)::text")
+            .bind(table)
+            .fetch_one(pool)
+            .await?;
+        if exists.is_none() {
+            continue;
+        }
+        // Safe: `tables` is a fixed internal constant, not user input
         let query = format!("SELECT COUNT(*) FROM {}", table);
         let n: i64 = sqlx::query_scalar(AssertSqlSafe(query))
             .fetch_one(pool)
@@ -337,6 +358,21 @@ mod tests {
         };
         let n = count_high_level_rows(&pool).await.expect("count");
         assert_eq!(n, 0, "fresh test database should be empty");
+        guard.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn count_rows_in_ignores_tables_that_do_not_exist() {
+        // A database that predates the migration which created a table
+        // must not make the count fail — the missing table contributes
+        // zero rows.
+        let Some((pool, guard)) = crate::common::tx_pool().await else {
+            return;
+        };
+        let n = count_rows_in(&pool, &["table_that_does_not_exist"])
+            .await
+            .expect("count");
+        assert_eq!(n, 0, "a missing table must contribute zero rows");
         guard.cleanup().await;
     }
 
