@@ -17,6 +17,7 @@ pub mod audit;
 pub mod config;
 pub mod data_sources;
 pub mod error;
+pub mod load;
 pub mod reconcile;
 pub mod refresh;
 pub mod registry;

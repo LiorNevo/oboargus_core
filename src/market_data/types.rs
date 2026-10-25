@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A typed identifier naming an asset / issuer / portfolio outside the system.
 ///
@@ -12,7 +12,11 @@ use serde::Serialize;
 /// `domain::asset_identifier::AssetIdentifier::scheme` (see spec 016,
 /// FR-023..FR-026). Examples: `"TICKER"`, `"ISIN"`, `"CUSIP"`, and the
 /// venue-qualified form `"TICKER:XNAS"`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// The wire surface of feature 018 calls this field the identifier's
+/// **type**; the stored representation calls it the `scheme`. One concept,
+/// two names (spec 018 FR-002).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TypedIdentifier {
     /// Scheme (open vocabulary; matched case-sensitively per registry rules).
     pub scheme: String,

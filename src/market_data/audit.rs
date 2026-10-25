@@ -215,6 +215,187 @@ pub async fn finish_refresh_run(
     Ok(row)
 }
 
+/// One row in `reference_data_load_runs`.
+///
+/// Implements FR-008 of `specs/018-load-reference-data/spec.md`.
+#[derive(Debug, Clone, PartialEq, Eq, FromRow, Serialize, Deserialize)]
+pub struct LoadRunRow {
+    /// Row id.
+    pub id: Uuid,
+    /// Run started at.
+    pub started_at: DateTime<Utc>,
+    /// Run ended at (`None` while in flight).
+    pub ended_at: Option<DateTime<Utc>>,
+    /// Trigger label: `"cli"`, `"api"`, or `"test"`.
+    pub trigger: String,
+    /// The caller's named preferred source id (`None` when unnamed).
+    ///
+    /// Preserved verbatim even when a different source actually answered
+    /// (FR-013 of spec 018).
+    pub requested_source: Option<String>,
+    /// The identifiers as received, before de-duplication.
+    pub identifiers_requested_raw: i32,
+    /// The repeated entries in the request.
+    pub identifiers_duplicated: i32,
+    /// The unique identifiers that reached the fetch stage.
+    pub identifiers_attempted: i32,
+    /// A row was written.
+    pub loaded: i32,
+    /// The identical fact was already known.
+    pub no_op: i32,
+    /// No asset claims the identifier.
+    pub not_resolved: i32,
+    /// The source holds no value for that date.
+    pub no_data_for_date: i32,
+    /// No enabled source claims the identifier's scheme.
+    pub unsupported_scheme: i32,
+    /// The source refused the request.
+    pub rejected: i32,
+    /// A transient or infrastructure failure.
+    pub source_unavailable: i32,
+    /// The source's budget was exhausted.
+    pub rate_limited: i32,
+    /// The store refused the write.
+    pub storage_failure: i32,
+    /// Per-source attempt counts (`{"yahoo_finance": 3, …}`).
+    pub per_source_attempted: serde_json::Value,
+    /// Per-source failure counts.
+    pub per_source_failed: serde_json::Value,
+    /// The per-identifier outcome lines.
+    pub per_identifier: serde_json::Value,
+    /// Wall-clock duration, in milliseconds (`None` while in flight).
+    pub duration_ms: Option<i64>,
+}
+
+/// Opens a new load-run audit row.
+///
+/// Returns the new row; the caller later calls [`finish_load_run`] to set
+/// `ended_at` and the counters.
+///
+/// Implements FR-008 of `specs/018-load-reference-data/spec.md`.
+pub async fn start_load_run(
+    pool: &sqlx::PgPool,
+    trigger: &str,
+    preferred_source: Option<&str>,
+) -> Result<LoadRunRow, MarketDataProviderError> {
+    let id = Uuid::new_v4();
+    let trigger_label = if trigger.is_empty() { "test" } else { trigger };
+    sqlx::query(
+        "INSERT INTO reference_data_load_runs (id, started_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, per_source_attempted, per_source_failed, per_identifier) \
+         VALUES ($1, NOW(), $2, $3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb)",
+    )
+    .bind(id)
+    .bind(trigger_label)
+    .bind(preferred_source)
+    .execute(pool)
+    .await
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("start_load_run: {e}")))?;
+
+    let row: LoadRunRow = sqlx::query_as(
+        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, per_source_attempted, per_source_failed, per_identifier, duration_ms \
+         FROM reference_data_load_runs WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("start_load_run read: {e}")))?;
+    Ok(row)
+}
+
+/// Updates an in-flight load-run row with the final counters and lines.
+///
+/// `identifiers_requested_raw` and `identifiers_duplicated` are passed
+/// separately: the raw count includes the repeated entries, and the unique
+/// count (raw − duplicated) is what the partition `CHECK` constrains.
+///
+/// Implements FR-008 of `specs/018-load-reference-data/spec.md`.
+#[allow(clippy::too_many_arguments)]
+pub async fn finish_load_run(
+    pool: &sqlx::PgPool,
+    run_id: Uuid,
+    identifiers_requested_raw: i32,
+    identifiers_duplicated: i32,
+    counters: &crate::market_data::load::DataSourceLoadCounters,
+    per_source_attempted: &serde_json::Value,
+    per_source_failed: &serde_json::Value,
+    per_identifier: &serde_json::Value,
+) -> Result<LoadRunRow, MarketDataProviderError> {
+    sqlx::query(
+        "UPDATE reference_data_load_runs \
+         SET ended_at = NOW(), \
+             identifiers_requested_raw = $2, \
+             identifiers_duplicated = $3, \
+             identifiers_attempted = $4, \
+             loaded = $5, \
+             no_op = $6, \
+             not_resolved = $7, \
+             no_data_for_date = $8, \
+             unsupported_scheme = $9, \
+             rejected = $10, \
+             source_unavailable = $11, \
+             rate_limited = $12, \
+             storage_failure = $13, \
+             per_source_attempted = $14, \
+             per_source_failed = $15, \
+             per_identifier = $16, \
+             duration_ms = (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint \
+         WHERE id = $1",
+    )
+    .bind(run_id)
+    .bind(identifiers_requested_raw)
+    .bind(identifiers_duplicated)
+    .bind(counters.total_attempted() as i32)
+    .bind(counters.loaded as i32)
+    .bind(counters.no_op as i32)
+    .bind(counters.not_resolved as i32)
+    .bind(counters.no_data_for_date as i32)
+    .bind(counters.unsupported_scheme as i32)
+    .bind(counters.rejected as i32)
+    .bind(counters.source_unavailable as i32)
+    .bind(counters.rate_limited as i32)
+    .bind(counters.storage_failure as i32)
+    .bind(per_source_attempted)
+    .bind(per_source_failed)
+    .bind(per_identifier)
+    .execute(pool)
+    .await
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("finish_load_run: {e}")))?;
+
+    let row: LoadRunRow = sqlx::query_as(
+        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, per_source_attempted, per_source_failed, per_identifier, duration_ms \
+         FROM reference_data_load_runs WHERE id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("finish_load_run read: {e}")))?;
+    Ok(row)
+}
+
+/// Reads a load-run audit row by id.
+///
+/// Implements FR-008 of `specs/018-load-reference-data/spec.md`.
+pub async fn get_load_run(
+    pool: &sqlx::PgPool,
+    run_id: Uuid,
+) -> Result<LoadRunRow, MarketDataProviderError> {
+    let row: Option<LoadRunRow> = sqlx::query_as(
+        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, per_source_attempted, per_source_failed, per_identifier, duration_ms \
+         FROM reference_data_load_runs WHERE id = $1",
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("get_load_run: {e}")))?;
+
+    match row {
+        Some(row) => Ok(row),
+        None => Err(MarketDataProviderError::NotFound(format!(
+            "load run '{run_id}' does not exist"
+        ))),
+    }
+}
+
 /// The payload of a reconciliation audit row.
 ///
 /// Bundles the audited fields so the write helper keeps a small argument

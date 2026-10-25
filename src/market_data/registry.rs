@@ -67,6 +67,23 @@ pub struct WalkOutcome {
     pub failures: Vec<SourceFailure>,
 }
 
+/// The outcome of a ranged registry walk.
+///
+/// Mirrors [`WalkOutcome`] for historical-range requests, so the caller can
+/// tell "no enabled source supports this scheme" apart from "a source was
+/// tried and failed".
+///
+/// Implements FR-009 of `specs/018-load-reference-data/spec.md`.
+#[derive(Debug, Clone)]
+pub struct RangeWalkOutcome {
+    /// The answer, when a source produced one.
+    pub range: Option<HistoricalRange>,
+    /// The typed error that ended the walk, when it produced no answer.
+    pub error: Option<MarketDataProviderError>,
+    /// Every source that failed during the walk, in the order consulted.
+    pub failures: Vec<SourceFailure>,
+}
+
 /// Source-agnostic façade. Constructed at startup with one trait object per
 /// configured source. Consumers call the registry, not individual providers.
 ///
@@ -269,6 +286,96 @@ impl DataSourceRegistry {
         }))
     }
 
+    /// The ranged "first success" walk, plus the per-source failures it
+    /// encountered along the way.
+    ///
+    /// Mirrors [`DataSourceRegistry::walk_latest_bar`] for ranged requests:
+    /// the same scheme filter and the same fail-over rule, plus the
+    /// per-source failure manifest the load's report needs (FR-006).
+    ///
+    /// When `preferred_source` names a configured source, that source is
+    /// consulted **first** — a preference, not a restriction: the fail-over
+    /// continues over the remaining enabled sources when it cannot answer
+    /// (FR-013 of spec 018). An id that is not configured never reaches the
+    /// walk; the caller rejects it as caller-input validation.
+    ///
+    /// The empty candidate set is signalled by exactly one contract:
+    /// `range: None`, `error: Some(NotFound("no enabled source supports
+    /// scheme '<scheme>'"))`, `failures: vec![]`.
+    ///
+    /// Implements FR-009 of spec 018.
+    pub async fn walk_historical_range(
+        &self,
+        request: HistoricalRangeRequest,
+        preferred_source: Option<&str>,
+    ) -> RangeWalkOutcome {
+        let mut candidates = self.candidates_for(&request.identifier.scheme);
+        if candidates.is_empty() {
+            return RangeWalkOutcome {
+                range: None,
+                error: Some(MarketDataProviderError::NotFound(format!(
+                    "no enabled source supports scheme '{}'",
+                    request.identifier.scheme
+                ))),
+                failures: Vec::new(),
+            };
+        }
+        if let Some(preferred) = preferred_source {
+            move_to_front(&mut candidates, preferred);
+        }
+
+        let mut last_retryable: Option<MarketDataProviderError> = None;
+        let mut failures: Vec<SourceFailure> = Vec::new();
+        for provider in &candidates {
+            match provider.get_historical_range(request.clone()).await {
+                Ok(range) => {
+                    return RangeWalkOutcome {
+                        range: Some(range),
+                        error: None,
+                        failures,
+                    };
+                }
+                Err(e) if e.should_fallover() => {
+                    tracing::warn!(
+                        source_id = provider.source_id(),
+                        error = %e,
+                        "provider returned retryable error; falling over"
+                    );
+                    failures.push(SourceFailure {
+                        source_id: provider.source_id().to_string(),
+                        error: e.clone(),
+                    });
+                    last_retryable = Some(e);
+                }
+                Err(e) => {
+                    tracing::info!(
+                        source_id = provider.source_id(),
+                        error = %e,
+                        "provider returned final error; not falling over"
+                    );
+                    failures.push(SourceFailure {
+                        source_id: provider.source_id().to_string(),
+                        error: e.clone(),
+                    });
+                    return RangeWalkOutcome {
+                        range: None,
+                        error: Some(e),
+                        failures,
+                    };
+                }
+            }
+        }
+        RangeWalkOutcome {
+            range: None,
+            error: Some(last_retryable.unwrap_or_else(|| {
+                MarketDataProviderError::Infrastructure(
+                    "registry walked all enabled candidates without a final answer".into(),
+                )
+            })),
+            failures,
+        }
+    }
+
     /// "Every enabled source's answer" — never fails because of a single
     /// source's failure. Returns a map keyed by `source_id` whose values
     /// are `Result<…, MarketDataProviderError>`. Sequential in v1
@@ -311,6 +418,25 @@ impl DataSourceRegistry {
             .filter(|p| scheme_matches(p.supported_schemes(), scheme))
             .cloned()
             .collect()
+    }
+}
+
+/// Moves the named source to the front of the candidate list.
+///
+/// A preferred source that is not among the candidates (disabled, or unable
+/// to answer this scheme) is simply not present — the order is unchanged.
+///
+/// Implements FR-013 of `specs/018-load-reference-data/spec.md`.
+fn move_to_front(
+    candidates: &mut Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+    preferred_source: &str,
+) {
+    if let Some(index) = candidates
+        .iter()
+        .position(|provider| provider.source_id() == preferred_source)
+    {
+        let preferred = candidates.remove(index);
+        candidates.insert(0, preferred);
     }
 }
 
@@ -834,6 +960,105 @@ pub(crate) mod tests {
             matches!(err, MarketDataProviderError::Transient(ref msg) if msg == "last"),
             "got: {err:?}"
         );
+    }
+
+    // ---------- walk_historical_range ----------
+
+    /// The ranged walk consults the named preferred source first, and the
+    /// fail-over continues over the remaining sources (FR-013).
+    #[tokio::test]
+    async fn walk_historical_range_consults_the_preferred_source_first() {
+        let mut preferred = MockMarketDataProvider::new("preferred", &["TICKER"], 20);
+        preferred
+            .historical
+            .insert("TICKER:AAPL".to_string(), Ok(make_range("preferred", 1)));
+        let mut normal = MockMarketDataProvider::new("normal", &["TICKER"], 10);
+        normal
+            .historical
+            .insert("TICKER:AAPL".to_string(), Ok(make_range("normal", 1)));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(normal) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(preferred) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+
+        let outcome = registry
+            .walk_historical_range(historical_request(), Some("preferred"))
+            .await;
+        assert_eq!(
+            outcome.range.expect("range").source_id,
+            "preferred",
+            "the named source must be consulted first"
+        );
+    }
+
+    /// A preferred source that cannot answer is fell over, and the failure
+    /// stays in the manifest (FR-013).
+    #[tokio::test]
+    async fn walk_historical_range_falls_over_from_the_preferred_source() {
+        let mut preferred = MockMarketDataProvider::new("preferred", &["TICKER"], 20);
+        preferred.historical.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Transient("boom".into())),
+        );
+        let mut normal = MockMarketDataProvider::new("normal", &["TICKER"], 10);
+        normal
+            .historical
+            .insert("TICKER:AAPL".to_string(), Ok(make_range("normal", 1)));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(normal) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(preferred) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+
+        let outcome = registry
+            .walk_historical_range(historical_request(), Some("preferred"))
+            .await;
+        assert_eq!(outcome.range.expect("range").source_id, "normal");
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].source_id, "preferred");
+    }
+
+    /// An empty candidate set is signalled by exactly one contract:
+    /// `range: None`, a `NotFound` error and an empty failure list.
+    #[tokio::test]
+    async fn walk_historical_range_without_candidates_reports_the_empty_contract() {
+        let a: Arc<dyn MarketDataProvider + Send + Sync> =
+            Arc::new(MockMarketDataProvider::new("a", &["ISIN"], 10));
+        let registry = DataSourceRegistry::new(vec![a]).expect("registry");
+        let outcome = registry
+            .walk_historical_range(historical_request(), None)
+            .await;
+        assert!(outcome.range.is_none());
+        assert!(outcome.failures.is_empty());
+        assert!(matches!(
+            outcome.error,
+            Some(MarketDataProviderError::NotFound(ref msg)) if msg.contains("no enabled source")
+        ));
+    }
+
+    /// The ranged walk records the failing source in its manifest.
+    #[tokio::test]
+    async fn walk_historical_range_records_the_failing_source() {
+        let mut failing = MockMarketDataProvider::new("failing", &["TICKER"], 10);
+        failing.historical.insert(
+            "TICKER:AAPL".to_string(),
+            Err(MarketDataProviderError::Transient("boom".into())),
+        );
+        let mut ok = MockMarketDataProvider::new("ok", &["TICKER"], 20);
+        ok.historical
+            .insert("TICKER:AAPL".to_string(), Ok(make_range("ok", 1)));
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(failing) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(ok) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+        let outcome = registry
+            .walk_historical_range(historical_request(), None)
+            .await;
+        assert_eq!(outcome.range.expect("range").source_id, "ok");
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].source_id, "failing");
     }
 
     // ---------- every_source_lookup_ticker ----------
