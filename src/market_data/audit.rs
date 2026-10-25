@@ -257,6 +257,14 @@ pub struct LoadRunRow {
     pub rate_limited: i32,
     /// The store refused the write.
     pub storage_failure: i32,
+    /// Assets created because the load could not resolve the identifier.
+    ///
+    /// A side-effect counter, not an outcome bucket (FR-016 of spec 018).
+    pub assets_created: i32,
+    /// Assets adopted after losing a concurrent creation race.
+    ///
+    /// A side-effect counter, not an outcome bucket (FR-016 of spec 018).
+    pub assets_adopted: i32,
     /// Per-source attempt counts (`{"yahoo_finance": 3, …}`).
     pub per_source_attempted: serde_json::Value,
     /// Per-source failure counts.
@@ -292,7 +300,7 @@ pub async fn start_load_run(
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("start_load_run: {e}")))?;
 
     let row: LoadRunRow = sqlx::query_as(
-        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, per_source_attempted, per_source_failed, per_identifier, duration_ms \
+        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, assets_created, assets_adopted, per_source_attempted, per_source_failed, per_identifier, duration_ms \
          FROM reference_data_load_runs WHERE id = $1",
     )
     .bind(id)
@@ -335,9 +343,11 @@ pub async fn finish_load_run(
              source_unavailable = $11, \
              rate_limited = $12, \
              storage_failure = $13, \
-             per_source_attempted = $14, \
-             per_source_failed = $15, \
-             per_identifier = $16, \
+             assets_created = $14, \
+             assets_adopted = $15, \
+             per_source_attempted = $16, \
+             per_source_failed = $17, \
+             per_identifier = $18, \
              duration_ms = (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint \
          WHERE id = $1",
     )
@@ -354,6 +364,8 @@ pub async fn finish_load_run(
     .bind(counters.source_unavailable as i32)
     .bind(counters.rate_limited as i32)
     .bind(counters.storage_failure as i32)
+    .bind(counters.assets_created as i32)
+    .bind(counters.assets_adopted as i32)
     .bind(per_source_attempted)
     .bind(per_source_failed)
     .bind(per_identifier)
@@ -362,7 +374,7 @@ pub async fn finish_load_run(
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("finish_load_run: {e}")))?;
 
     let row: LoadRunRow = sqlx::query_as(
-        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, per_source_attempted, per_source_failed, per_identifier, duration_ms \
+        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, assets_created, assets_adopted, per_source_attempted, per_source_failed, per_identifier, duration_ms \
          FROM reference_data_load_runs WHERE id = $1",
     )
     .bind(run_id)
@@ -380,7 +392,7 @@ pub async fn get_load_run(
     run_id: Uuid,
 ) -> Result<LoadRunRow, MarketDataProviderError> {
     let row: Option<LoadRunRow> = sqlx::query_as(
-        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, per_source_attempted, per_source_failed, per_identifier, duration_ms \
+        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, assets_created, assets_adopted, per_source_attempted, per_source_failed, per_identifier, duration_ms \
          FROM reference_data_load_runs WHERE id = $1",
     )
     .bind(run_id)

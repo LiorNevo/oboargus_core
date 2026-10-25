@@ -24,22 +24,27 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
-use obolargus_core::domain::asset::create::create_asset;
+use obolargus_core::domain::asset::create::{create_asset, create_asset_with_identifier};
 use obolargus_core::domain::asset::entity::NewAsset;
 use obolargus_core::domain::asset_identifier::create::create_asset_identifier;
 use obolargus_core::domain::asset_identifier::entity::NewAssetIdentifier;
 use obolargus_core::domain::asset_reference_data::read::get_current_asset_reference_data;
-use obolargus_core::domain::id::AssetId;
+use obolargus_core::domain::error::DomainError;
+use obolargus_core::domain::id::{AssetId, DomainId};
 use obolargus_core::market_data::audit::{finish_load_run, get_load_run, start_load_run};
 use obolargus_core::market_data::error::MarketDataProviderError;
 use obolargus_core::market_data::load::{
-    DataSourceLoadCounters, IdentifierLoadConfig, LoadOutcome, RunStatus, run_identifier_load,
+    AssetCreation, CurrencySource, DataSourceLoadCounters, IdentifierLoadConfig, LoadOutcome,
+    RunStatus, run_identifier_load,
+};
+use obolargus_core::market_data::load_range::{
+    IdentifierRangeLoadConfig, run_identifier_range_load,
 };
 use obolargus_core::market_data::registry::DataSourceRegistry;
 use obolargus_core::market_data::trait_::MarketDataProvider;
 use obolargus_core::market_data::types::{
     HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, PriceBar,
-    TickerLookupRequest, TickerLookupResult, TypedIdentifier,
+    TickerLookupHit, TickerLookupRequest, TickerLookupResult, TypedIdentifier,
 };
 
 use obolargus_core::common::*;
@@ -55,6 +60,10 @@ struct ScriptedProvider {
     priority: i32,
     enabled: bool,
     answers: HashMap<String, Result<HistoricalRange, MarketDataProviderError>>,
+    /// Scripted ticker-lookup answers, keyed by query.
+    lookups: HashMap<String, Result<TickerLookupResult, MarketDataProviderError>>,
+    /// When `true`, any requested date is answered with a bar for that date.
+    answer_every_date: bool,
 }
 
 impl ScriptedProvider {
@@ -65,11 +74,23 @@ impl ScriptedProvider {
             priority,
             enabled: true,
             answers: HashMap::new(),
+            lookups: HashMap::new(),
+            answer_every_date: false,
         }
+    }
+
+    /// Answers every requested date with a bar for that date.
+    fn answer_every_date(&mut self) {
+        self.answer_every_date = true;
     }
 
     fn answers(&mut self, key: &str, range: HistoricalRange) {
         self.answers.insert(key.to_string(), Ok(range));
+    }
+
+    /// Scripts a lookup result for one query.
+    fn lookups(&mut self, query: &str, result: TickerLookupResult) {
+        self.lookups.insert(query.to_string(), Ok(result));
     }
 
     /// Scripts a failure for one identifier.
@@ -118,6 +139,9 @@ impl MarketDataProvider for ScriptedProvider {
         &self,
         request: HistoricalRangeRequest,
     ) -> Result<HistoricalRange, MarketDataProviderError> {
+        if self.answer_every_date {
+            return Ok(range_for(&self.source_id, request.from));
+        }
         let key = format!("{}:{}", request.identifier.scheme, request.identifier.value);
         match self.answers.get(&key) {
             Some(Ok(range)) => Ok(range.clone()),
@@ -130,11 +154,16 @@ impl MarketDataProvider for ScriptedProvider {
 
     async fn lookup_ticker(
         &self,
-        _request: TickerLookupRequest,
+        request: TickerLookupRequest,
     ) -> Result<TickerLookupResult, MarketDataProviderError> {
-        Err(MarketDataProviderError::Unsupported(
-            "mock: lookup not implemented".into(),
-        ))
+        match self.lookups.get(&request.query) {
+            Some(Ok(result)) => Ok(result.clone()),
+            Some(Err(error)) => Err(error.clone()),
+            None => Err(MarketDataProviderError::NotFound(format!(
+                "mock lookup '{}' not configured",
+                request.query
+            ))),
+        }
     }
 }
 
@@ -224,6 +253,8 @@ async fn valid_request_stores_one_row_per_resolved_asset() {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         },
     )
     .await
@@ -270,6 +301,8 @@ async fn unknown_identifier_is_not_resolved_and_others_still_load() {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         },
     )
     .await
@@ -303,6 +336,8 @@ async fn same_day_reload_reports_no_op_and_stores_nothing() {
         preferred_source: None,
         trigger: "test".into(),
         dry_run: false,
+        create_missing_assets: false,
+        default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
     };
 
     let first = run_identifier_load(Some(&pool), &registry, config.clone())
@@ -342,6 +377,8 @@ async fn load_writes_through_the_canonical_api() {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         },
     )
     .await
@@ -432,6 +469,8 @@ async fn interrupted_run_leaves_an_in_flight_record() {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         },
     )
     .await
@@ -452,8 +491,11 @@ async fn later_day_reload_stores_a_second_row_and_keeps_history() {
         return;
     };
 
-    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
-    let later = NaiveDate::from_ymd_opt(2026, 10, 27).expect("date");
+    // A later day reload: use clock-relative dates so the fixture never
+    // drifts into the future (as-of dates must not be later than today).
+    let today = chrono::Utc::now().date_naive();
+    let date = today - chrono::Duration::days(2);
+    let later = today;
     let asset_id = seed_asset(&pool, "TICKER:XNAS", "AAPL").await;
 
     let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
@@ -469,6 +511,8 @@ async fn later_day_reload_stores_a_second_row_and_keeps_history() {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         },
     )
     .await
@@ -489,6 +533,8 @@ async fn later_day_reload_stores_a_second_row_and_keeps_history() {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         },
     )
     .await
@@ -523,6 +569,8 @@ async fn concurrent_same_day_loads_leave_one_row() {
         preferred_source: None,
         trigger: "test".into(),
         dry_run: false,
+        create_missing_assets: false,
+        default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
     };
 
     let first = {
@@ -577,6 +625,8 @@ async fn stored_counters_equal_the_report_counters() {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         },
     )
     .await
@@ -616,6 +666,8 @@ async fn per_identifier_outcomes_round_trip_through_jsonb() {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         },
     )
     .await
@@ -628,4 +680,384 @@ async fn per_identifier_outcomes_round_trip_through_jsonb() {
     assert_eq!(lines[0]["outcome"], "loaded");
     assert_eq!(lines[0]["source_id"], "yahoo_finance");
     assert_eq!(lines[0]["attempted"], true);
+}
+
+// ---------------------------------------------------------------------------
+// Asset creation (FR-014..FR-016)
+// ---------------------------------------------------------------------------
+
+/// One exact upstream hit for `symbol`, as Yahoo's search would return it.
+fn exact_hit(symbol: &str, quote_type: &str, exchange: &str) -> TickerLookupHit {
+    TickerLookupHit {
+        symbol: symbol.to_string(),
+        short_name: Some(format!("{symbol} Fund")),
+        long_name: Some(format!("{symbol} Long Name")),
+        quote_type: Some(quote_type.to_string()),
+        exchange: Some(exchange.to_string()),
+        currency: None,
+        schemes: Vec::new(),
+        relevance: Some(1.0),
+    }
+}
+
+fn lookup_result(hit: TickerLookupHit) -> TickerLookupResult {
+    TickerLookupResult {
+        hits: vec![hit],
+        source_id: "yahoo_finance".to_string(),
+    }
+}
+
+/// A missing ticker is created (asset + identifier), then loaded on the same
+/// run, and the report records the creation and the currency fallback.
+#[tokio::test]
+async fn create_missing_assets_creates_the_asset_and_loads_it() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    provider.lookups("QQQM", lookup_result(exact_hit("QQQM", "ETF", "NMS")));
+    provider.answers("TICKER:XNAS:QQQM", range_for("yahoo_finance", date));
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_load(
+        Some(&pool),
+        &registry,
+        IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "QQQM")],
+            as_of_date: date,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+            create_missing_assets: true,
+            default_currency: "USD".to_string(),
+        },
+    )
+    .await
+    .expect("report");
+
+    assert_eq!(report.loaded, 1);
+    assert_eq!(report.assets_created, 1);
+    assert_eq!(report.assets_adopted, 0);
+    assert_eq!(report.not_resolved, 0);
+
+    let line = &report.identifiers[0];
+    assert_eq!(line.outcome, LoadOutcome::Loaded);
+    assert_eq!(
+        line.asset_creation,
+        AssetCreation::Created {
+            source_id: "yahoo_finance".to_string(),
+            currency_source: CurrencySource::ConfiguredDefault,
+        }
+    );
+
+    let asset_id = line.asset_id.expect("asset id");
+    assert_eq!(count_rows(&pool, asset_id, date).await, 1);
+
+    let asset = obolargus_core::domain::asset::read::get_asset(&pool, AssetId::from_uuid(asset_id))
+        .await
+        .expect("asset");
+    assert_eq!(asset.asset_type, "ETF");
+    assert_eq!(asset.currency, "USD");
+    assert_eq!(asset.display_name, "QQQM Fund");
+
+    let claimed = obolargus_core::domain::asset_identifier::read::find_asset_by_identifier(
+        &pool,
+        "TICKER:XNAS",
+        "QQQM",
+    )
+    .await
+    .expect("lookup")
+    .expect("the created identifier resolves");
+    assert_eq!(claimed.id, asset_id);
+
+    // The created counters are persisted on the run row.
+    let stored = get_load_run(&pool, report.run_id.expect("run id"))
+        .await
+        .expect("run row");
+    assert_eq!(stored.assets_created, 1);
+    assert_eq!(stored.assets_adopted, 0);
+}
+
+/// A fuzzy (non-exact) match must never create an asset.
+#[tokio::test]
+async fn create_missing_assets_refuses_a_fuzzy_match() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    // The upstream answers with a *different* symbol.
+    provider.lookups("QQQM", lookup_result(exact_hit("QQQ", "ETF", "NMS")));
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_load(
+        Some(&pool),
+        &registry,
+        IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "QQQM")],
+            as_of_date: date,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+            create_missing_assets: true,
+            default_currency: "USD".to_string(),
+        },
+    )
+    .await
+    .expect("report");
+
+    assert_eq!(report.not_resolved, 1);
+    assert_eq!(report.assets_created, 0);
+    let line = &report.identifiers[0];
+    assert_eq!(line.outcome, LoadOutcome::NotResolved);
+    assert!(!line.attempted);
+    assert!(matches!(
+        line.asset_creation,
+        AssetCreation::Declined { .. }
+    ));
+
+    let asset = obolargus_core::domain::asset_identifier::read::find_asset_by_identifier(
+        &pool,
+        "TICKER:XNAS",
+        "QQQM",
+    )
+    .await
+    .expect("lookup");
+    assert!(asset.is_none(), "nothing was created");
+}
+
+/// A non-ticker scheme is never created in v1.
+#[tokio::test]
+async fn create_missing_assets_refuses_a_non_ticker_scheme() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    let provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_load(
+        Some(&pool),
+        &registry,
+        IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("ISIN", "US0378331005")],
+            as_of_date: date,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+            create_missing_assets: true,
+            default_currency: "USD".to_string(),
+        },
+    )
+    .await
+    .expect("report");
+
+    assert_eq!(report.not_resolved, 1);
+    assert_eq!(report.assets_created, 0);
+    assert_eq!(
+        report.identifiers[0].asset_creation,
+        AssetCreation::Declined {
+            reason: obolargus_core::market_data::load::CreationDecline::UnsupportedScheme,
+        }
+    );
+}
+
+/// A foreign venue is refused instead of creating the wrong instrument.
+#[tokio::test]
+async fn create_missing_assets_refuses_a_venue_mismatch() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    provider.lookups("SAP", lookup_result(exact_hit("SAP", "EQUITY", "GER")));
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_load(
+        Some(&pool),
+        &registry,
+        IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "SAP")],
+            as_of_date: date,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+            create_missing_assets: true,
+            default_currency: "USD".to_string(),
+        },
+    )
+    .await
+    .expect("report");
+
+    assert_eq!(report.not_resolved, 1);
+    assert_eq!(report.assets_created, 0);
+    assert_eq!(
+        report.identifiers[0].asset_creation,
+        AssetCreation::Declined {
+            reason: obolargus_core::market_data::load::CreationDecline::VenueMismatch,
+        }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Range loads (FR-014)
+// ---------------------------------------------------------------------------
+
+/// A three-day range runs every calendar day, in date order, and writes one
+/// audit row per date.
+#[tokio::test]
+async fn a_range_load_runs_every_date_in_order_and_audits_each() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let from = NaiveDate::from_ymd_opt(2026, 10, 22).expect("date");
+    let to = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    seed_asset(&pool, "TICKER:XNAS", "AAPL").await;
+
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    provider.answer_every_date();
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_range_load(
+        Some(&pool),
+        &registry,
+        IdentifierRangeLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
+            from,
+            to,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+            concurrency: 3,
+            create_missing_assets: false,
+            default_currency: "USD".to_string(),
+        },
+    )
+    .await
+    .expect("range report");
+
+    assert_eq!(report.dates_requested, 3);
+    assert_eq!(report.dates_with_loads, 3);
+    assert_eq!(report.totals.loaded, 3);
+    assert_eq!(report.status, RunStatus::Complete);
+    let dates: Vec<NaiveDate> = report.dates.iter().map(|section| section.date).collect();
+    assert_eq!(dates, vec![from, from + chrono::Duration::days(1), to]);
+    assert_eq!(report.run_ids.len(), 3);
+    assert!(report.run_ids.iter().all(Option::is_some));
+
+    let (run_rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM reference_data_load_runs")
+        .fetch_one(&pool)
+        .await
+        .expect("count runs");
+    assert_eq!(run_rows, 3, "one audit row per date");
+}
+
+/// A date the upstream has no bar for writes no row and is reported as such.
+#[tokio::test]
+async fn a_range_load_surfaces_a_date_with_no_data() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let from = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    let to = NaiveDate::from_ymd_opt(2026, 10, 25).expect("date");
+    let asset_id = seed_asset(&pool, "TICKER:XNAS", "AAPL").await;
+
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    // Only Saturday (the 24th) has a bar; Sunday (the 25th) does not.
+    provider.answers("TICKER:XNAS:AAPL", range_for("yahoo_finance", from));
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_range_load(
+        Some(&pool),
+        &registry,
+        IdentifierRangeLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
+            from,
+            to,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+            concurrency: 2,
+            create_missing_assets: false,
+            default_currency: "USD".to_string(),
+        },
+    )
+    .await
+    .expect("range report");
+
+    assert_eq!(report.totals.loaded, 1);
+    assert_eq!(report.totals.no_data_for_date, 1);
+    assert_eq!(report.dates_with_loads, 1);
+    assert_eq!(report.dates_with_nothing_stored, 1);
+    assert_eq!(count_rows(&pool, asset_id, from).await, 1);
+    assert_eq!(count_rows(&pool, asset_id, to).await, 0);
+}
+
+/// The creation write is atomic: a colliding identifier rolls the asset row
+/// back, leaves no orphan, and returns the typed uniqueness violation that
+/// the load turns into an adoption (FR-015, NFR-005).
+#[tokio::test]
+async fn create_asset_with_identifier_rolls_back_on_a_collision() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let existing = seed_asset(&pool, "TICKER:XNAS", "QQQM").await;
+    let (assets_before,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM assets")
+        .fetch_one(&pool)
+        .await
+        .expect("count before");
+
+    let error = create_asset_with_identifier(
+        &pool,
+        NewAsset {
+            asset_type: "ETF".to_string(),
+            display_name: "Duplicate QQQM".to_string(),
+            currency: "USD".to_string(),
+            backed_by_portfolio_id: None,
+            issuer_id: None,
+        },
+        "TICKER:XNAS",
+        "QQQM",
+    )
+    .await
+    .expect_err("the identifier is already claimed");
+
+    assert!(
+        matches!(
+            error,
+            DomainError::InvariantViolation { invariant, .. } if invariant == "identifier_uniqueness"
+        ),
+        "got {error:?}"
+    );
+
+    let (assets_after,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM assets")
+        .fetch_one(&pool)
+        .await
+        .expect("count after");
+    assert_eq!(assets_before, assets_after, "the asset insert rolled back");
+
+    let found = obolargus_core::domain::asset_identifier::read::find_asset_by_identifier(
+        &pool,
+        "TICKER:XNAS",
+        "QQQM",
+    )
+    .await
+    .expect("lookup")
+    .expect("the original asset still resolves");
+    assert_eq!(found.id, existing);
 }

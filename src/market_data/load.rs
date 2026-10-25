@@ -10,6 +10,12 @@
 //!
 //! The CLI (FR-011) and the API (FR-012) are thin witnesses of this one
 //! operation — neither implements its own fetch/store loop.
+//!
+//! Two additions layer on the primitive without changing it:
+//! `create_missing_assets` (FR-015/FR-016) resolves a missing asset through
+//! an exact upstream lookup and creates it atomically before the fetch, and
+//! `load_range` (FR-014) drives this operation once per calendar day with a
+//! bounded window.
 
 #![forbid(unsafe_code)]
 
@@ -19,21 +25,35 @@ use chrono::{NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::asset::create::create_asset_with_identifier;
+use crate::domain::asset::entity::{Asset, NewAsset};
 use crate::domain::asset_identifier::read as asset_identifier_read;
 use crate::domain::asset_reference_data::create as asset_reference_data_create;
 use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
 use crate::domain::asset_reference_data::read as asset_reference_data_read;
+use crate::domain::error::DomainError;
 use crate::domain::id::AssetId;
 use crate::market_data::audit::{finish_load_run, start_load_run};
 use crate::market_data::error::MarketDataProviderError;
-use crate::market_data::registry::DataSourceRegistry;
-use crate::market_data::types::{HistoricalRangeRequest, PriceBar, TypedIdentifier};
+use crate::market_data::registry::{DataSourceRegistry, TickerLookupMatch, TickerLookupWalk};
+use crate::market_data::types::{
+    HistoricalRangeRequest, PriceBar, TickerLookupHit, TypedIdentifier,
+};
 
 /// Fact type written by the load operation for end-of-day OHLCV bars.
 ///
 /// Implements FR-004 of spec 018 (the same fact type the predecessor's
 /// refresh writes).
 pub const FACT_TYPE_MARKET_PRICE: &str = "market_price";
+
+/// The currency recorded on an auto-created asset when the upstream omits it.
+///
+/// Yahoo's search endpoint does not return a currency (spec 017 research), so
+/// creation falls back to this value and records the provenance on the
+/// report line (`currency_source: configured_default`).
+///
+/// Implements FR-015 of spec 018.
+pub const DEFAULT_ASSET_CURRENCY: &str = "USD";
 
 /// The classification of one requested identifier.
 ///
@@ -50,7 +70,10 @@ pub enum LoadOutcome {
     /// Nothing was written because the identical fact is already known
     /// (same asset, fact, as-of date and knowledge date).
     NoOp,
-    /// No asset claims the identifier; no source was contacted.
+    /// No asset claims the identifier, so nothing was fetched.
+    ///
+    /// With `create_missing_assets` on, the identifier may still have been
+    /// looked up upstream; `asset_creation` records that attempt.
     NotResolved,
     /// The source answered authoritatively that it holds no value for that
     /// date — a non-trading day, or an upstream that does not recognize the
@@ -69,6 +92,87 @@ pub enum LoadOutcome {
     /// The reference-data store refused the write for a reason other than
     /// the idempotency collision.
     StorageFailure,
+}
+
+/// What the asset-creation path did for one identifier.
+///
+/// `create_missing_assets` turns the otherwise-dead `not_resolved` line into
+/// a lookup + create attempt. This type records that side effect without
+/// adding a tenth outcome bucket: the line's `outcome` stays inside the
+/// closed nine-category vocabulary.
+///
+/// Implements FR-016 of spec 018.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case", tag = "status")]
+pub enum AssetCreation {
+    /// Creation was not asked for (`create_missing_assets` was off).
+    #[default]
+    NotRequested,
+    /// A dry run would have attempted creation, but contacts nothing.
+    WouldAttempt,
+    /// This run created the asset and the identifier that names it.
+    Created {
+        /// The source that confirmed the exact symbol.
+        source_id: String,
+        /// Where the asset's currency came from.
+        currency_source: CurrencySource,
+    },
+    /// A concurrent creator won the unique-key race; this run adopted its
+    /// asset instead of failing (the mirror of the reference-data
+    /// collision rule, research D12).
+    Adopted {
+        /// The adopted asset's id.
+        asset_id: Uuid,
+    },
+    /// Creation was considered and deliberately refused.
+    Declined {
+        /// Why it was refused.
+        reason: CreationDecline,
+    },
+    /// Creation was attempted and the store refused it.
+    Failed {
+        /// Credential-free error text.
+        error: String,
+    },
+}
+
+/// Where a created asset's currency came from.
+///
+/// Implements FR-015 of spec 018.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurrencySource {
+    /// The upstream lookup returned a currency.
+    Upstream,
+    /// The upstream omitted it and the configured default was used.
+    ConfiguredDefault,
+}
+
+/// Why the creation path refused to create an asset.
+///
+/// Every reason is a deliberate, reportable refusal — never a silent skip.
+///
+/// Implements FR-015 of spec 018.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CreationDecline {
+    /// The identifier's scheme is not `TICKER` / `TICKER:*`; v1 only
+    /// creates ticker-named instruments.
+    UnsupportedScheme,
+    /// The identifier value is not a plausible ticker symbol.
+    InvalidSymbol,
+    /// Every source answered, but none returned the exact symbol.
+    NoUpstreamMatch,
+    /// Several exact symbol matches were returned and the venue could not
+    /// disambiguate them.
+    AmbiguousMatch,
+    /// The exact match trades on a different venue than the identifier
+    /// names, or on a venue the upstream code cannot be mapped to.
+    VenueMismatch,
+    /// The upstream quote type is not in the canonical asset-type map.
+    UnsupportedAssetType,
+    /// The lookup itself failed (a transient or infrastructure error).
+    LookupFailed,
 }
 
 /// One source's answer (or failure) during a registry walk.
@@ -95,11 +199,22 @@ pub struct LoadIdentifierOutcome {
     pub identifier: TypedIdentifier,
     /// The claimed asset, when resolution succeeded.
     pub asset_id: Option<Uuid>,
-    /// Whether the load consulted the data-source registry for this line.
+    /// What the optional asset-creation path did for this line.
     ///
-    /// `true` for every outcome except `not_resolved`; an
-    /// `unsupported_scheme` line consulted the registry but contacted no
-    /// source.
+    /// `not_requested` unless `create_missing_assets` was on. Only a
+    /// `not_resolved` line can carry a creation record other than
+    /// `not_requested`; a created asset's line goes on to report the fetch
+    /// outcome and carries `created` alongside it. Serde-defaulted so
+    /// version-1 payloads written before the field existed still
+    /// deserialize (FR-016).
+    #[serde(default)]
+    pub asset_creation: AssetCreation,
+    /// Whether the line belongs to the fetch-attempted partition.
+    ///
+    /// `true` for every outcome except `not_resolved`. A `not_resolved` line
+    /// may still have consulted a source for the optional asset-creation
+    /// lookup (FR-015); that activity is recorded by `asset_creation`, not
+    /// here, so the audit table's partition is unchanged (FR-006/FR-016).
     pub attempted: bool,
     /// The chosen classification (the fixed vocabulary of FR-005).
     pub outcome: LoadOutcome,
@@ -129,13 +244,15 @@ pub enum RunStatus {
     Failed,
 }
 
-/// Per-run counters, one field per outcome bucket.
+/// Per-run counters: one field per outcome bucket, plus the two creation
+/// side-effect counters.
 ///
 /// The fetch-attempted buckets partition `identifiers_attempted` exactly as
 /// the audit table's `CHECK` constraint does; `not_resolved` is kept out of
-/// that partition (it was never attempted).
+/// that partition (it was never attempted). `assets_created` and
+/// `assets_adopted` are not outcomes and are not part of either partition.
 ///
-/// Implements FR-005 / FR-006 / FR-008 of spec 018.
+/// Implements FR-005 / FR-006 / FR-008 / FR-016 of spec 018.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DataSourceLoadCounters {
     /// A row was written.
@@ -156,6 +273,14 @@ pub struct DataSourceLoadCounters {
     pub rate_limited: i64,
     /// The store refused the write.
     pub storage_failure: i64,
+    /// Assets created because the load could not resolve an identifier.
+    ///
+    /// A side-effect counter, not an outcome bucket (FR-016).
+    pub assets_created: i64,
+    /// Assets adopted after losing a concurrent creation race.
+    ///
+    /// A side-effect counter, not an outcome bucket (FR-016).
+    pub assets_adopted: i64,
 }
 
 impl DataSourceLoadCounters {
@@ -225,6 +350,13 @@ pub struct IdentifierLoadConfig {
     /// When `true`, the load computes the report but persists nothing at
     /// all — no reference-data rows and no run record (FR-008).
     pub dry_run: bool,
+    /// When `true`, an identifier that resolves to no asset is looked up
+    /// upstream and — on an exact symbol match with a supported asset type —
+    /// created (with its identifier) before the fetch (FR-015/FR-016).
+    pub create_missing_assets: bool,
+    /// The currency recorded on a created asset when the upstream omits one
+    /// (FR-015). Callers pass [`DEFAULT_ASSET_CURRENCY`].
+    pub default_currency: String,
 }
 
 /// The execution report returned by every load call.
@@ -265,6 +397,10 @@ pub struct IdentifierLoadReport {
     pub rate_limited: usize,
     /// The store refused the write.
     pub storage_failure: usize,
+    /// Assets created by this run (FR-016).
+    pub assets_created: usize,
+    /// Assets adopted after a concurrent creation race (FR-016).
+    pub assets_adopted: usize,
     /// Per-source attempt counts.
     pub per_source_attempted: BTreeMap<String, usize>,
     /// Per-source failure counts.
@@ -339,8 +475,7 @@ pub async fn run_identifier_load(
             pool,
             registry,
             identifier,
-            config.as_of_date,
-            config.preferred_source.as_deref(),
+            &config,
             &mut counters,
             &mut per_source_attempted,
             &mut per_source_failed,
@@ -402,6 +537,15 @@ fn dry_run_report(
         .map(|identifier| LoadIdentifierOutcome {
             identifier: identifier.clone(),
             asset_id: None,
+            asset_creation: if config.create_missing_assets
+                && ticker_venue(&identifier.scheme).is_some()
+            {
+                // A dry run contacts nothing, so it can only say what it
+                // *would* attempt — never that it would create (FR-008).
+                AssetCreation::WouldAttempt
+            } else {
+                AssetCreation::NotRequested
+            },
             attempted: false,
             outcome: LoadOutcome::NotResolved,
             source_id: None,
@@ -426,6 +570,8 @@ fn dry_run_report(
         source_unavailable: 0,
         rate_limited: 0,
         storage_failure: 0,
+        assets_created: 0,
+        assets_adopted: 0,
         per_source_attempted: BTreeMap::new(),
         per_source_failed: BTreeMap::new(),
         identifiers: lines,
@@ -437,19 +583,20 @@ fn dry_run_report(
 
 /// Resolves, fetches, classifies and stores one identifier.
 ///
-/// Implements FR-003..FR-005 of spec 018.
+/// Implements FR-003..FR-005 and FR-015..FR-016 of spec 018.
 #[allow(clippy::too_many_arguments)]
 async fn process_identifier(
     pool: &sqlx::PgPool,
     registry: &DataSourceRegistry,
     identifier: &TypedIdentifier,
-    as_of_date: NaiveDate,
-    preferred_source: Option<&str>,
+    config: &IdentifierLoadConfig,
     counters: &mut DataSourceLoadCounters,
     per_source_attempted: &mut BTreeMap<String, usize>,
     per_source_failed: &mut BTreeMap<String, usize>,
 ) -> LoadIdentifierOutcome {
-    let asset = match asset_identifier_read::find_asset_by_identifier(
+    let as_of_date = config.as_of_date;
+
+    let resolved = match asset_identifier_read::find_asset_by_identifier(
         pool,
         &identifier.scheme,
         &identifier.value,
@@ -464,40 +611,76 @@ async fn process_identifier(
                 "identifier lookup failed"
             );
             counters.storage_failure += 1;
-            return LoadIdentifierOutcome {
-                identifier: identifier.clone(),
-                asset_id: None,
-                attempted: false,
-                outcome: LoadOutcome::StorageFailure,
-                source_id: None,
-                per_source: Vec::new(),
-            };
+            return outcome_line(
+                identifier,
+                None,
+                true,
+                LoadOutcome::StorageFailure,
+                None,
+                Vec::new(),
+                AssetCreation::NotRequested,
+            );
         }
     };
 
-    let Some(asset) = asset else {
-        // No asset claims the identifier: the registry is never consulted,
-        // so the line was not attempted (FR-003 / research D13).
-        counters.not_resolved += 1;
-        return LoadIdentifierOutcome {
-            identifier: identifier.clone(),
-            asset_id: None,
-            attempted: false,
-            outcome: LoadOutcome::NotResolved,
-            source_id: None,
-            per_source: Vec::new(),
-        };
+    let mut creation = AssetCreation::NotRequested;
+    let mut per_source: Vec<SourceOutcome> = Vec::new();
+
+    let asset = match resolved {
+        Some(asset) => asset,
+        None if !config.create_missing_assets => {
+            // No asset claims the identifier: the fetch registry is never
+            // consulted, so the line was not attempted (FR-003 / D13).
+            counters.not_resolved += 1;
+            return outcome_line(
+                identifier,
+                None,
+                false,
+                LoadOutcome::NotResolved,
+                None,
+                Vec::new(),
+                AssetCreation::NotRequested,
+            );
+        }
+        None => {
+            let attempt = attempt_asset_creation(
+                pool,
+                registry,
+                identifier,
+                config,
+                counters,
+                per_source_attempted,
+                per_source_failed,
+            )
+            .await;
+            per_source = attempt.per_source;
+            creation = attempt.creation;
+
+            match attempt.asset {
+                Some(asset) => asset,
+                None => {
+                    let outcome = attempt.outcome.unwrap_or(LoadOutcome::NotResolved);
+                    counters.increment(outcome);
+                    // `not_resolved` stays outside the fetch-attempted
+                    // partition even when a creation lookup consulted a
+                    // source; a lookup that failed *is* an attempted line.
+                    let attempted = outcome != LoadOutcome::NotResolved;
+                    return outcome_line(
+                        identifier, None, attempted, outcome, None, per_source, creation,
+                    );
+                }
+            }
+        }
     };
 
     let asset_id = AssetId(asset.id);
     let walk = registry
         .walk_historical_range(
             build_range_request(identifier, as_of_date),
-            preferred_source,
+            config.preferred_source.as_deref(),
         )
         .await;
 
-    let mut per_source: Vec<SourceOutcome> = Vec::new();
     for failure in &walk.failures {
         *per_source_failed
             .entry(failure.source_id.clone())
@@ -523,27 +706,29 @@ async fn process_identifier(
     let Some(range) = walk.range else {
         let outcome = classify_walk_failure(&walk);
         counters.increment(outcome);
-        return LoadIdentifierOutcome {
-            identifier: identifier.clone(),
-            asset_id: Some(asset_id.0),
-            attempted: true,
+        return outcome_line(
+            identifier,
+            Some(asset_id.0),
+            true,
             outcome,
-            source_id: None,
+            None,
             per_source,
-        };
+            creation,
+        );
     };
 
     let bars = bars_for_requested_date(&range.bars, as_of_date);
     let Some(bar) = bars.first().cloned() else {
         counters.no_data_for_date += 1;
-        return LoadIdentifierOutcome {
-            identifier: identifier.clone(),
-            asset_id: Some(asset_id.0),
-            attempted: true,
-            outcome: LoadOutcome::NoDataForDate,
-            source_id: Some(range.source_id.clone()),
+        return outcome_line(
+            identifier,
+            Some(asset_id.0),
+            true,
+            LoadOutcome::NoDataForDate,
+            Some(range.source_id.clone()),
             per_source,
-        };
+            creation,
+        );
     };
 
     let stored = store_bar(
@@ -563,14 +748,412 @@ async fn process_identifier(
     };
     counters.increment(outcome);
 
+    outcome_line(
+        identifier,
+        Some(asset_id.0),
+        true,
+        outcome,
+        Some(range.source_id.clone()),
+        per_source,
+        creation,
+    )
+}
+
+/// Assembles one report line.
+///
+/// Implements FR-006 of spec 018.
+#[allow(clippy::too_many_arguments)]
+fn outcome_line(
+    identifier: &TypedIdentifier,
+    asset_id: Option<Uuid>,
+    attempted: bool,
+    outcome: LoadOutcome,
+    source_id: Option<String>,
+    per_source: Vec<SourceOutcome>,
+    asset_creation: AssetCreation,
+) -> LoadIdentifierOutcome {
     LoadIdentifierOutcome {
         identifier: identifier.clone(),
-        asset_id: Some(asset_id.0),
-        attempted: true,
+        asset_id,
+        asset_creation,
+        attempted,
         outcome,
-        source_id: Some(range.source_id.clone()),
+        source_id,
         per_source,
     }
+}
+
+/// The outcome of the optional lookup-and-create step.
+struct CreationAttempt {
+    /// The asset to fetch for, when the step produced one.
+    asset: Option<Asset>,
+    /// What the step did, for the report line.
+    creation: AssetCreation,
+    /// The line's outcome, when creation consumed the line (a decline or a
+    /// store failure). `None` means "continue to the fetch".
+    outcome: Option<LoadOutcome>,
+    /// The lookup's per-source manifest.
+    per_source: Vec<SourceOutcome>,
+}
+
+/// Looks the identifier up upstream and, on an exact match, creates the asset
+/// and its identifier in one transaction.
+///
+/// Every refusal is reported — nothing is created on a fuzzy match, a
+/// lookup failure, a venue mismatch or an unmapped asset type.
+///
+/// Implements FR-015 / FR-016 of spec 018.
+#[allow(clippy::too_many_arguments)]
+async fn attempt_asset_creation(
+    pool: &sqlx::PgPool,
+    registry: &DataSourceRegistry,
+    identifier: &TypedIdentifier,
+    config: &IdentifierLoadConfig,
+    counters: &mut DataSourceLoadCounters,
+    per_source_attempted: &mut BTreeMap<String, usize>,
+    per_source_failed: &mut BTreeMap<String, usize>,
+) -> CreationAttempt {
+    let Some(venue) = ticker_venue(&identifier.scheme) else {
+        return CreationAttempt::declined(CreationDecline::UnsupportedScheme);
+    };
+    if !is_plausible_symbol(&identifier.value) {
+        return CreationAttempt::declined(CreationDecline::InvalidSymbol);
+    }
+
+    let walk = registry
+        .walk_ticker_lookup_exact(
+            &identifier.value,
+            &identifier.scheme,
+            config.preferred_source.as_deref(),
+        )
+        .await;
+
+    for failure in &walk.failures {
+        *per_source_failed
+            .entry(failure.source_id.clone())
+            .or_insert(0) += 1;
+    }
+    let mut per_source = lookup_manifest(&walk);
+
+    if walk.matches.is_empty() {
+        return match walk.error.as_ref() {
+            Some(error) if !walk.failures.is_empty() => {
+                let (outcome, reason) = match error {
+                    MarketDataProviderError::NotFound(_) => {
+                        (LoadOutcome::NotResolved, CreationDecline::NoUpstreamMatch)
+                    }
+                    other => (
+                        map_provider_error_to_outcome(other),
+                        CreationDecline::LookupFailed,
+                    ),
+                };
+                CreationAttempt {
+                    asset: None,
+                    creation: AssetCreation::Declined { reason },
+                    outcome: Some(outcome),
+                    per_source,
+                }
+            }
+            _ => CreationAttempt {
+                asset: None,
+                creation: AssetCreation::Declined {
+                    reason: CreationDecline::NoUpstreamMatch,
+                },
+                outcome: Some(LoadOutcome::NotResolved),
+                per_source,
+            },
+        };
+    }
+
+    let chosen = match choose_lookup_match(&walk.matches, venue) {
+        Ok(chosen) => chosen,
+        Err(reason) => {
+            return CreationAttempt {
+                asset: None,
+                creation: AssetCreation::Declined { reason },
+                outcome: Some(LoadOutcome::NotResolved),
+                per_source,
+            };
+        }
+    };
+
+    *per_source_attempted
+        .entry(chosen.source_id.clone())
+        .or_insert(0) += 1;
+    per_source.push(SourceOutcome {
+        source_id: chosen.source_id.clone(),
+        ok: true,
+        error: None,
+    });
+
+    let Some(asset_type) = canonical_asset_type(chosen.hit.quote_type.as_deref()) else {
+        return CreationAttempt {
+            asset: None,
+            creation: AssetCreation::Declined {
+                reason: CreationDecline::UnsupportedAssetType,
+            },
+            outcome: Some(LoadOutcome::NotResolved),
+            per_source,
+        };
+    };
+
+    let (currency, currency_source) = derive_currency(&chosen.hit, &config.default_currency);
+    let new_asset = NewAsset {
+        asset_type: asset_type.to_string(),
+        display_name: derive_display_name(&chosen.hit),
+        currency,
+        backed_by_portfolio_id: None,
+        issuer_id: None,
+    };
+
+    match create_asset_with_identifier(pool, new_asset, &identifier.scheme, &identifier.value).await
+    {
+        Ok(asset) => {
+            counters.assets_created += 1;
+            CreationAttempt {
+                asset: Some(asset),
+                creation: AssetCreation::Created {
+                    source_id: chosen.source_id.clone(),
+                    currency_source,
+                },
+                outcome: None,
+                per_source,
+            }
+        }
+        Err(error) if is_identifier_uniqueness_violation(&error) => {
+            // A concurrent creator won the unique-key race: adopt its asset
+            // instead of failing (the mirror of research D12).
+            match asset_identifier_read::find_asset_by_identifier(
+                pool,
+                &identifier.scheme,
+                &identifier.value,
+            )
+            .await
+            {
+                Ok(Some(asset)) => {
+                    let adopted_id = asset.id;
+                    counters.assets_adopted += 1;
+                    CreationAttempt {
+                        asset: Some(asset),
+                        creation: AssetCreation::Adopted {
+                            asset_id: adopted_id,
+                        },
+                        outcome: None,
+                        per_source,
+                    }
+                }
+                Ok(None) | Err(_) => CreationAttempt {
+                    asset: None,
+                    creation: AssetCreation::Failed {
+                        error: "identifier collision but no asset claims it".to_string(),
+                    },
+                    outcome: Some(LoadOutcome::StorageFailure),
+                    per_source,
+                },
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                identifier = ?identifier,
+                error = %error,
+                "asset creation failed"
+            );
+            CreationAttempt {
+                asset: None,
+                creation: AssetCreation::Failed {
+                    error: error.to_string(),
+                },
+                outcome: Some(LoadOutcome::StorageFailure),
+                per_source,
+            }
+        }
+    }
+}
+
+impl CreationAttempt {
+    /// A creation attempt that was refused before anything was contacted.
+    fn declined(reason: CreationDecline) -> Self {
+        Self {
+            asset: None,
+            creation: AssetCreation::Declined { reason },
+            outcome: Some(LoadOutcome::NotResolved),
+            per_source: Vec::new(),
+        }
+    }
+}
+
+/// Maps the lookup walk's failures to the report's per-source manifest.
+///
+/// Implements FR-006 / FR-015 of spec 018.
+fn lookup_manifest(walk: &TickerLookupWalk) -> Vec<SourceOutcome> {
+    walk.failures
+        .iter()
+        .map(|failure| SourceOutcome {
+            source_id: failure.source_id.clone(),
+            ok: false,
+            error: Some(failure.error.to_string()),
+        })
+        .collect()
+}
+
+/// Picks the one exact match, refusing to guess.
+///
+/// A venue-qualified identifier must agree with the match's exchange; a bare
+/// `TICKER` must produce exactly one match.
+///
+/// Implements FR-015 of spec 018.
+fn choose_lookup_match<'a>(
+    matches: &'a [TickerLookupMatch],
+    venue: Option<&str>,
+) -> Result<&'a TickerLookupMatch, CreationDecline> {
+    let candidate = if matches.len() == 1 {
+        &matches[0]
+    } else {
+        match venue {
+            None => return Err(CreationDecline::AmbiguousMatch),
+            Some(venue) => {
+                let mut filtered = matches
+                    .iter()
+                    .filter(|matched| hit_matches_venue(&matched.hit, venue));
+                match (filtered.next(), filtered.next()) {
+                    (None, _) => return Err(CreationDecline::VenueMismatch),
+                    (Some(one), None) => one,
+                    (Some(_), Some(_)) => return Err(CreationDecline::AmbiguousMatch),
+                }
+            }
+        }
+    };
+
+    if let Some(venue) = venue
+        && !hit_matches_venue(&candidate.hit, venue)
+    {
+        return Err(CreationDecline::VenueMismatch);
+    }
+    Ok(candidate)
+}
+
+/// Whether a lookup hit trades on the identifier's venue.
+///
+/// Implements FR-015 of spec 018.
+fn hit_matches_venue(hit: &TickerLookupHit, venue: &str) -> bool {
+    yahoo_exchange_mic(hit.exchange.as_deref()).is_some_and(|mic| mic.eq_ignore_ascii_case(venue))
+}
+
+/// Maps Yahoo's exchange code to a MIC.
+///
+/// The upstream search endpoint reports venue codes such as `NMS`, not the
+/// MICs the identifier schemes use; an unmapped code is treated as
+/// unverifiable, never as a match.
+///
+/// Implements FR-015 of spec 018.
+fn yahoo_exchange_mic(exchange: Option<&str>) -> Option<&'static str> {
+    let code = exchange?.trim().to_ascii_uppercase();
+    match code.as_str() {
+        "NMS" | "NGM" | "NCM" | "NAS" => Some("XNAS"),
+        "NYQ" | "NYS" => Some("XNYS"),
+        "PCX" | "PSE" => Some("ARCX"),
+        "ASE" | "AMEX" => Some("XASE"),
+        "BTS" | "BATS" => Some("BATS"),
+        "OTC" | "PNK" | "OQX" | "OB" => Some("OTC"),
+        _ => None,
+    }
+}
+
+/// The venue an identifier's scheme names, if it is a ticker scheme.
+///
+/// `None` means "not a ticker scheme"; `Some(None)` means a bare `TICKER`;
+/// `Some(Some(mic))` means a venue-qualified `TICKER:<MIC>`.
+///
+/// Implements FR-015 of spec 018.
+fn ticker_venue(scheme: &str) -> Option<Option<&str>> {
+    let scheme = scheme.trim();
+    if scheme.eq_ignore_ascii_case("TICKER") {
+        return Some(None);
+    }
+    let (prefix, venue) = scheme.split_once(':')?;
+    if prefix.eq_ignore_ascii_case("TICKER") && !venue.trim().is_empty() {
+        Some(Some(venue.trim()))
+    } else {
+        None
+    }
+}
+
+/// Whether a value is a plausible ticker symbol.
+///
+/// Implements FR-015 of spec 018.
+fn is_plausible_symbol(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.len() <= 20
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+}
+
+/// Maps an upstream quote type onto the canonical asset-type vocabulary.
+///
+/// An unknown quote type is refused rather than guessed: a wrong asset type
+/// is worse than an unresolved identifier.
+///
+/// Implements FR-015 of spec 018.
+fn canonical_asset_type(quote_type: Option<&str>) -> Option<&'static str> {
+    let quote_type = quote_type?.trim().to_ascii_uppercase();
+    match quote_type.as_str() {
+        "EQUITY" | "STOCK" => Some("EQUITY"),
+        "ETF" => Some("ETF"),
+        "MUTUALFUND" | "MUTUAL_FUND" | "MUTUAL FUND" => Some("MUTUALFUND"),
+        "INDEX" => Some("INDEX"),
+        "CURRENCY" => Some("CURRENCY"),
+        "CRYPTOCURRENCY" | "CRYPTO" => Some("CRYPTO"),
+        "FUTURE" => Some("FUTURE"),
+        _ => None,
+    }
+}
+
+/// Derives a created asset's display name.
+///
+/// Implements FR-015 of spec 018.
+fn derive_display_name(hit: &TickerLookupHit) -> String {
+    hit.short_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            hit.long_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+        })
+        .unwrap_or_else(|| hit.symbol.trim())
+        .to_string()
+}
+
+/// Derives a created asset's currency and records its provenance.
+///
+/// Implements FR-015 of spec 018.
+fn derive_currency(hit: &TickerLookupHit, default_currency: &str) -> (String, CurrencySource) {
+    match hit
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .filter(|currency| !currency.is_empty())
+    {
+        Some(currency) => (currency.to_ascii_uppercase(), CurrencySource::Upstream),
+        None => (
+            default_currency.trim().to_ascii_uppercase(),
+            CurrencySource::ConfiguredDefault,
+        ),
+    }
+}
+
+/// Whether an error is the identifier-uniqueness race, not a real failure.
+///
+/// Implements FR-015 of spec 018.
+fn is_identifier_uniqueness_violation(error: &DomainError) -> bool {
+    matches!(
+        error,
+        DomainError::InvariantViolation { invariant, .. } if *invariant == "identifier_uniqueness"
+    )
 }
 
 /// Validates the caller's input before anything is contacted.
@@ -590,13 +1173,20 @@ fn validate_request(
     }
     validate_as_of_date(config.as_of_date)?;
     validate_preferred_source(config.preferred_source.as_deref(), registry)?;
+    if config.create_missing_assets && config.default_currency.trim().is_empty() {
+        return Err(MarketDataProviderError::Validation(
+            "the default asset currency is empty".into(),
+        ));
+    }
     Ok(())
 }
 
 /// Rejects an identifier with an empty type or value.
 ///
 /// Implements FR-002 of spec 018.
-fn validate_identifier_pair(identifier: &TypedIdentifier) -> Result<(), MarketDataProviderError> {
+pub(crate) fn validate_identifier_pair(
+    identifier: &TypedIdentifier,
+) -> Result<(), MarketDataProviderError> {
     if identifier.scheme.trim().is_empty() {
         return Err(MarketDataProviderError::Validation(
             "an identifier's type is empty".into(),
@@ -614,7 +1204,7 @@ fn validate_identifier_pair(identifier: &TypedIdentifier) -> Result<(), MarketDa
 /// Rejects an as-of date later than today (UTC).
 ///
 /// Implements FR-002 of spec 018.
-fn validate_as_of_date(as_of_date: NaiveDate) -> Result<(), MarketDataProviderError> {
+pub(crate) fn validate_as_of_date(as_of_date: NaiveDate) -> Result<(), MarketDataProviderError> {
     let today = Utc::now().date_naive();
     if as_of_date > today {
         return Err(MarketDataProviderError::Validation(format!(
@@ -630,7 +1220,7 @@ fn validate_as_of_date(as_of_date: NaiveDate) -> Result<(), MarketDataProviderEr
 /// skipped like any other disabled source (FR-010 / FR-013).
 ///
 /// Implements FR-002 / FR-013 of spec 018.
-fn validate_preferred_source(
+pub(crate) fn validate_preferred_source(
     preferred_source: Option<&str>,
     registry: &DataSourceRegistry,
 ) -> Result<(), MarketDataProviderError> {
@@ -891,6 +1481,8 @@ fn build_report(
         source_unavailable: counters.source_unavailable as usize,
         rate_limited: counters.rate_limited as usize,
         storage_failure: counters.storage_failure as usize,
+        assets_created: counters.assets_created as usize,
+        assets_adopted: counters.assets_adopted as usize,
         per_source_attempted,
         per_source_failed,
         identifiers: lines,
@@ -1111,6 +1703,8 @@ mod tests {
             source_unavailable: 2,
             rate_limited: 1,
             storage_failure: 1,
+            assets_created: 0,
+            assets_adopted: 0,
         };
 
         // The fetch-attempted partition: every bucket except `not_resolved`.
@@ -1235,6 +1829,8 @@ mod tests {
             preferred_source: None,
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: crate::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         };
         let error = validate_request(&config, &registry).expect_err("validation error");
         assert!(matches!(error, MarketDataProviderError::Validation(_)));
@@ -1254,6 +1850,8 @@ mod tests {
             preferred_source: Some("not_configured".into()),
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: crate::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         };
         let error = validate_request(&config, &registry).expect_err("validation error");
         assert!(matches!(error, MarketDataProviderError::Validation(_)));
@@ -1273,6 +1871,8 @@ mod tests {
             preferred_source: Some("mock".into()),
             trigger: "test".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: crate::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         };
         assert!(validate_request(&config, &registry).is_ok());
     }
@@ -1543,6 +2143,8 @@ mod tests {
             source_unavailable: 1,
             rate_limited: 1,
             storage_failure: 1,
+            assets_created: 0,
+            assets_adopted: 0,
         };
         let now = Utc::now();
         let report = build_report(
@@ -1665,6 +2267,8 @@ mod tests {
             preferred_source: None,
             trigger: "cli".into(),
             dry_run: true,
+            create_missing_assets: false,
+            default_currency: crate::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         };
 
         // No pool is needed for a dry run.
@@ -1690,6 +2294,8 @@ mod tests {
             preferred_source: None,
             trigger: "cli".into(),
             dry_run: false,
+            create_missing_assets: false,
+            default_currency: crate::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
         };
         let error = run_identifier_load(None, &registry, config)
             .await
@@ -1752,6 +2358,7 @@ mod tests {
         let lines = vec![LoadIdentifierOutcome {
             identifier: TypedIdentifier::new("TICKER", "AAPL"),
             asset_id: Some(Uuid::nil()),
+            asset_creation: AssetCreation::NotRequested,
             attempted: true,
             outcome: LoadOutcome::Loaded,
             source_id: Some("secondary".into()),
@@ -1786,5 +2393,180 @@ mod tests {
             Some("secondary")
         );
         assert_eq!(report.identifiers[0].per_source[0].source_id, "preferred");
+    }
+    // ---------- FR-015/FR-016: the creation helpers ----------
+
+    fn lookup_hit(symbol: &str, exchange: &str) -> TickerLookupHit {
+        TickerLookupHit {
+            symbol: symbol.to_string(),
+            short_name: Some("Short Name".to_string()),
+            long_name: Some("A Longer Name".to_string()),
+            quote_type: Some("ETF".to_string()),
+            exchange: Some(exchange.to_string()),
+            currency: None,
+            schemes: Vec::new(),
+            relevance: Some(1.0),
+        }
+    }
+
+    /// Only ticker schemes are eligible, and a venue qualifier is retained.
+    #[test]
+    fn ticker_venue_classifies_schemes() {
+        assert_eq!(ticker_venue("TICKER"), Some(None));
+        assert_eq!(ticker_venue("ticker"), Some(None));
+        assert_eq!(ticker_venue("TICKER:XNAS"), Some(Some("XNAS")));
+        assert_eq!(ticker_venue("ticker:xnas"), Some(Some("xnas")));
+        assert_eq!(ticker_venue("ISIN"), None);
+        assert_eq!(ticker_venue("CUSIP"), None);
+        assert_eq!(ticker_venue("TICKER:"), None);
+    }
+
+    /// A plausible symbol is short and ASCII; anything else is refused.
+    #[test]
+    fn symbols_are_validated_conservatively() {
+        assert!(is_plausible_symbol("AAPL"));
+        assert!(is_plausible_symbol("BRK.B"));
+        assert!(is_plausible_symbol("RDS-A"));
+        assert!(!is_plausible_symbol(""));
+        assert!(!is_plausible_symbol("   "));
+        assert!(!is_plausible_symbol("AAPL; DROP TABLE"));
+        assert!(!is_plausible_symbol(&"A".repeat(21)));
+    }
+
+    /// The asset-type map is canonical and closed.
+    #[test]
+    fn asset_types_map_to_a_closed_vocabulary() {
+        assert_eq!(canonical_asset_type(Some("EQUITY")), Some("EQUITY"));
+        assert_eq!(canonical_asset_type(Some("etf")), Some("ETF"));
+        assert_eq!(canonical_asset_type(Some("MUTUALFUND")), Some("MUTUALFUND"));
+        assert_eq!(canonical_asset_type(Some("INDEX")), Some("INDEX"));
+        assert_eq!(canonical_asset_type(None), None);
+        assert_eq!(canonical_asset_type(Some("SOMETHING_NEW")), None);
+    }
+
+    /// Display name prefers the short name, then the long name, then the
+    /// symbol.
+    #[test]
+    fn display_name_falls_back_in_order() {
+        let mut hit = lookup_hit("QQQM", "NMS");
+        assert_eq!(derive_display_name(&hit), "Short Name");
+        hit.short_name = Some("  ".to_string());
+        assert_eq!(derive_display_name(&hit), "A Longer Name");
+        hit.long_name = None;
+        assert_eq!(derive_display_name(&hit), "QQQM");
+    }
+
+    /// Currency provenance is recorded, never guessed silently.
+    #[test]
+    fn currency_records_its_provenance() {
+        let mut hit = lookup_hit("QQQM", "NMS");
+        assert_eq!(
+            derive_currency(&hit, "usd"),
+            ("USD".to_string(), CurrencySource::ConfiguredDefault)
+        );
+        hit.currency = Some("eur".to_string());
+        assert_eq!(
+            derive_currency(&hit, "USD"),
+            ("EUR".to_string(), CurrencySource::Upstream)
+        );
+    }
+
+    /// A bare ticker must resolve unambiguously.
+    #[test]
+    fn an_ambiguous_bare_ticker_is_refused() {
+        let matches = vec![
+            TickerLookupMatch {
+                source_id: "a".into(),
+                hit: lookup_hit("ABC", "NMS"),
+            },
+            TickerLookupMatch {
+                source_id: "a".into(),
+                hit: lookup_hit("ABC", "NYQ"),
+            },
+        ];
+        assert_eq!(
+            choose_lookup_match(&matches, None).expect_err("ambiguous"),
+            CreationDecline::AmbiguousMatch
+        );
+    }
+
+    /// A venue qualifier disambiguates, and a foreign venue is refused.
+    #[test]
+    fn a_venue_qualifier_selects_or_refuses() {
+        let matches = vec![
+            TickerLookupMatch {
+                source_id: "a".into(),
+                hit: lookup_hit("ABC", "NMS"),
+            },
+            TickerLookupMatch {
+                source_id: "a".into(),
+                hit: lookup_hit("ABC", "NYQ"),
+            },
+        ];
+        let chosen = choose_lookup_match(&matches, Some("XNYS")).expect("chosen");
+        assert_eq!(chosen.hit.exchange.as_deref(), Some("NYQ"));
+
+        assert_eq!(
+            choose_lookup_match(&matches, Some("XLON")).expect_err("mismatch"),
+            CreationDecline::VenueMismatch
+        );
+    }
+
+    /// Yahoo's exchange codes map onto MICs; unknown codes do not.
+    #[test]
+    fn yahoo_exchanges_map_to_mics() {
+        assert_eq!(yahoo_exchange_mic(Some("NMS")), Some("XNAS"));
+        assert_eq!(yahoo_exchange_mic(Some("nyq")), Some("XNYS"));
+        assert_eq!(yahoo_exchange_mic(Some("PCX")), Some("ARCX"));
+        assert_eq!(yahoo_exchange_mic(Some("GER")), None);
+        assert_eq!(yahoo_exchange_mic(None), None);
+    }
+
+    /// The creation record serializes to the contract names.
+    #[test]
+    fn asset_creation_serializes_to_contract_names() {
+        let cases = [
+            (
+                AssetCreation::NotRequested,
+                serde_json::json!({"status": "not_requested"}),
+            ),
+            (
+                AssetCreation::WouldAttempt,
+                serde_json::json!({"status": "would_attempt"}),
+            ),
+            (
+                AssetCreation::Declined {
+                    reason: CreationDecline::NoUpstreamMatch,
+                },
+                serde_json::json!({"status": "declined", "reason": "no_upstream_match"}),
+            ),
+            (
+                AssetCreation::Adopted {
+                    asset_id: Uuid::nil(),
+                },
+                serde_json::json!({"status": "adopted", "asset_id": Uuid::nil()}),
+            ),
+        ];
+        for (creation, expected) in cases {
+            assert_eq!(
+                serde_json::to_value(&creation).expect("serialize"),
+                expected
+            );
+        }
+    }
+
+    /// A version-1 payload written before the field existed still parses.
+    #[test]
+    fn a_line_without_asset_creation_deserializes_as_not_requested() {
+        let line = serde_json::json!({
+            "identifier": {"scheme": "TICKER", "value": "AAPL"},
+            "asset_id": null,
+            "attempted": false,
+            "outcome": "not_resolved",
+            "source_id": null,
+            "per_source": []
+        });
+        let parsed: LoadIdentifierOutcome = serde_json::from_value(line).expect("deserialize");
+        assert_eq!(parsed.asset_creation, AssetCreation::NotRequested);
     }
 }

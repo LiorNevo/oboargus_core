@@ -14,8 +14,8 @@ use serde::Serialize;
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::trait_::MarketDataProvider;
 use crate::market_data::types::{
-    HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, TickerLookupRequest,
-    TickerLookupResult,
+    HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, TickerLookupHit,
+    TickerLookupRequest, TickerLookupResult,
 };
 
 /// Lightweight, serializable description of one configured source.
@@ -62,6 +62,34 @@ pub struct WalkOutcome {
     /// The answer, when a source produced one.
     pub bar: Option<LatestBar>,
     /// The typed error that ended the walk, when it produced no answer.
+    pub error: Option<MarketDataProviderError>,
+    /// Every source that failed during the walk, in the order consulted.
+    pub failures: Vec<SourceFailure>,
+}
+
+/// One exact-symbol match produced by a lookup walk.
+///
+/// Implements FR-014 of `specs/018-load-reference-data/spec.md`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TickerLookupMatch {
+    /// The source that returned the hit.
+    pub source_id: String,
+    /// The hit whose symbol matched the query exactly.
+    pub hit: TickerLookupHit,
+}
+
+/// The outcome of a ticker-lookup walk.
+///
+/// `matches` carries every exact-symbol hit the first answering source
+/// produced — zero (nothing recognized the symbol), one (unambiguous), or
+/// several (the caller must refuse to guess).
+///
+/// Implements FR-014 of `specs/018-load-reference-data/spec.md`.
+#[derive(Debug, Clone)]
+pub struct TickerLookupWalk {
+    /// Exact-symbol matches, in the answering source's order.
+    pub matches: Vec<TickerLookupMatch>,
+    /// The typed error that ended the walk, when it produced no match.
     pub error: Option<MarketDataProviderError>,
     /// Every source that failed during the walk, in the order consulted.
     pub failures: Vec<SourceFailure>,
@@ -371,6 +399,98 @@ impl DataSourceRegistry {
                 MarketDataProviderError::Infrastructure(
                     "registry walked all enabled candidates without a final answer".into(),
                 )
+            })),
+            failures,
+        }
+    }
+
+    /// The ticker-lookup walk used by asset creation.
+    ///
+    /// Consulted sources are the scheme's candidates in the usual priority
+    /// order, with `preferred_source` moved to the front (FR-013 of spec
+    /// 018). Only **exact symbol matches** are returned: a hit whose
+    /// `symbol` does not equal `query` (case-insensitively) is ignored, so
+    /// a fuzzy upstream match can never be mistaken for the requested
+    /// instrument.
+    ///
+    /// The walk stops at the first source that produced at least one exact
+    /// match. When no source produced a match, `matches` is empty and
+    /// `error` names the last retryable failure, or a `NotFound` when every
+    /// consulted source answered but none recognized the symbol.
+    ///
+    /// Implements FR-014 of spec 018.
+    pub async fn walk_ticker_lookup_exact(
+        &self,
+        query: &str,
+        scheme: &str,
+        preferred_source: Option<&str>,
+    ) -> TickerLookupWalk {
+        let mut candidates = self.candidates_for(scheme);
+        if candidates.is_empty() {
+            return TickerLookupWalk {
+                matches: Vec::new(),
+                error: Some(MarketDataProviderError::NotFound(format!(
+                    "no enabled source supports scheme '{scheme}'"
+                ))),
+                failures: Vec::new(),
+            };
+        }
+        if let Some(preferred) = preferred_source {
+            move_to_front(&mut candidates, preferred);
+        }
+
+        let mut failures: Vec<SourceFailure> = Vec::new();
+        let mut last_retryable: Option<MarketDataProviderError> = None;
+        for provider in &candidates {
+            let request = TickerLookupRequest {
+                query: query.to_string(),
+            };
+            match provider.lookup_ticker(request).await {
+                Ok(result) => {
+                    let matches: Vec<TickerLookupMatch> = result
+                        .hits
+                        .into_iter()
+                        .filter(|hit| hit.symbol.eq_ignore_ascii_case(query))
+                        .map(|hit| TickerLookupMatch {
+                            source_id: provider.source_id().to_string(),
+                            hit,
+                        })
+                        .collect();
+                    if !matches.is_empty() {
+                        return TickerLookupWalk {
+                            matches,
+                            error: None,
+                            failures,
+                        };
+                    }
+                }
+                Err(e) if e.should_fallover() => {
+                    failures.push(SourceFailure {
+                        source_id: provider.source_id().to_string(),
+                        error: e.clone(),
+                    });
+                    last_retryable = Some(e);
+                }
+                Err(e) => {
+                    failures.push(SourceFailure {
+                        source_id: provider.source_id().to_string(),
+                        error: e.clone(),
+                    });
+                    return TickerLookupWalk {
+                        matches: Vec::new(),
+                        error: Some(e),
+                        failures,
+                    };
+                }
+            }
+        }
+
+        TickerLookupWalk {
+            matches: Vec::new(),
+            error: Some(last_retryable.unwrap_or_else(|| {
+                MarketDataProviderError::NotFound(format!(
+                    "no enabled source recognizes symbol '{query}'"
+                ))
             })),
             failures,
         }
@@ -1093,6 +1213,123 @@ pub(crate) mod tests {
         assert_eq!(map.len(), 2);
         assert_eq!(map["a"].as_ref().expect("a").hits.len(), 1);
         assert!(map["b"].is_err());
+    }
+
+    // ---------- walk_ticker_lookup_exact ----------
+
+    /// Only exact-symbol hits come back, and the walk stops at the first
+    /// source that has one.
+    #[tokio::test]
+    async fn exact_lookup_ignores_fuzzy_hits_and_stops_at_the_first_match() {
+        let mut a = MockMarketDataProvider::new("a", &["TICKER"], 10);
+        a.lookup.insert(
+            "QQQM".to_string(),
+            Ok(TickerLookupResult {
+                hits: vec![make_hit("QQQ", 0.99)],
+                source_id: "a".to_string(),
+            }),
+        );
+        let mut b = MockMarketDataProvider::new("b", &["TICKER"], 20);
+        b.lookup.insert(
+            "QQQM".to_string(),
+            Ok(TickerLookupResult {
+                hits: vec![make_hit("QQQM", 0.5)],
+                source_id: "b".to_string(),
+            }),
+        );
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+
+        let walk = registry
+            .walk_ticker_lookup_exact("QQQM", "TICKER", None)
+            .await;
+        assert_eq!(walk.matches.len(), 1);
+        assert_eq!(walk.matches[0].source_id, "b");
+        assert_eq!(walk.matches[0].hit.symbol, "QQQM");
+        assert!(walk.failures.is_empty());
+    }
+
+    /// The named preferred source is consulted first.
+    #[tokio::test]
+    async fn exact_lookup_honours_the_preferred_source() {
+        let mut a = MockMarketDataProvider::new("a", &["TICKER"], 10);
+        a.lookup.insert(
+            "AAPL".to_string(),
+            Ok(TickerLookupResult {
+                hits: vec![make_hit("AAPL", 0.9)],
+                source_id: "a".to_string(),
+            }),
+        );
+        let mut b = MockMarketDataProvider::new("b", &["TICKER"], 20);
+        b.lookup.insert(
+            "AAPL".to_string(),
+            Ok(TickerLookupResult {
+                hits: vec![make_hit("AAPL", 0.9)],
+                source_id: "b".to_string(),
+            }),
+        );
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>,
+            Arc::new(b) as Arc<dyn MarketDataProvider + Send + Sync>,
+        ])
+        .expect("registry");
+
+        let walk = registry
+            .walk_ticker_lookup_exact("AAPL", "TICKER", Some("b"))
+            .await;
+        assert_eq!(walk.matches.len(), 1);
+        assert_eq!(walk.matches[0].source_id, "b");
+    }
+
+    /// No exact hit and no failures is an authoritative "not recognized".
+    #[tokio::test]
+    async fn exact_lookup_without_a_match_reports_not_found() {
+        let mut a = MockMarketDataProvider::new("a", &["TICKER"], 10);
+        a.lookup.insert(
+            "QQQM".to_string(),
+            Ok(TickerLookupResult {
+                hits: vec![make_hit("QQQ", 0.99)],
+                source_id: "a".to_string(),
+            }),
+        );
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(a) as Arc<dyn MarketDataProvider + Send + Sync>
+        ])
+        .expect("registry");
+
+        let walk = registry
+            .walk_ticker_lookup_exact("QQQM", "TICKER", None)
+            .await;
+        assert!(walk.matches.is_empty());
+        assert!(walk.failures.is_empty());
+        assert!(matches!(
+            walk.error,
+            Some(MarketDataProviderError::NotFound(_))
+        ));
+    }
+
+    /// A scheme with no candidate source is signalled without contacting
+    /// anything.
+    #[tokio::test]
+    async fn exact_lookup_without_a_candidate_is_not_found() {
+        let provider = MockMarketDataProvider::new("a", &["TICKER"], 10);
+        let registry = DataSourceRegistry::new(vec![
+            Arc::new(provider) as Arc<dyn MarketDataProvider + Send + Sync>
+        ])
+        .expect("registry");
+
+        let walk = registry
+            .walk_ticker_lookup_exact("US0378331005", "ISIN", None)
+            .await;
+        assert!(walk.matches.is_empty());
+        assert!(walk.failures.is_empty());
+        assert!(matches!(
+            walk.error,
+            Some(MarketDataProviderError::NotFound(_))
+        ));
     }
 
     // ---------- fixtures ----------

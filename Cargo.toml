@@ -16,6 +16,7 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.18", features = ["v4", "serde"] }
 thiserror = "2.0"
 async-trait = "0.1"
+futures = "0.3"
 tracing.workspace = true
 
 # Integration tests under `tests/` link against the crate as an external
