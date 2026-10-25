@@ -216,13 +216,14 @@ async fn valid_request_stores_one_row_per_resolved_asset() {
     let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
 
     let report = run_identifier_load(
-        &pool,
+        Some(&pool),
         &registry,
         IdentifierLoadConfig {
             identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
             as_of_date: date,
             preferred_source: None,
             trigger: "test".into(),
+            dry_run: false,
         },
     )
     .await
@@ -258,7 +259,7 @@ async fn unknown_identifier_is_not_resolved_and_others_still_load() {
     let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
 
     let report = run_identifier_load(
-        &pool,
+        Some(&pool),
         &registry,
         IdentifierLoadConfig {
             identifiers: vec![
@@ -268,6 +269,7 @@ async fn unknown_identifier_is_not_resolved_and_others_still_load() {
             as_of_date: date,
             preferred_source: None,
             trigger: "test".into(),
+            dry_run: false,
         },
     )
     .await
@@ -300,14 +302,15 @@ async fn same_day_reload_reports_no_op_and_stores_nothing() {
         as_of_date: date,
         preferred_source: None,
         trigger: "test".into(),
+        dry_run: false,
     };
 
-    let first = run_identifier_load(&pool, &registry, config.clone())
+    let first = run_identifier_load(Some(&pool), &registry, config.clone())
         .await
         .expect("first");
     assert_eq!(first.loaded, 1);
 
-    let second = run_identifier_load(&pool, &registry, config)
+    let second = run_identifier_load(Some(&pool), &registry, config)
         .await
         .expect("second");
     assert_eq!(second.no_op, 1);
@@ -331,13 +334,14 @@ async fn load_writes_through_the_canonical_api() {
     let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
 
     run_identifier_load(
-        &pool,
+        Some(&pool),
         &registry,
         IdentifierLoadConfig {
             identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
             as_of_date: date,
             preferred_source: None,
             trigger: "test".into(),
+            dry_run: false,
         },
     )
     .await
@@ -407,7 +411,146 @@ async fn interrupted_run_leaves_an_in_flight_record() {
 
     let run = start_load_run(&pool, "test", None).await.expect("start");
     let read = get_load_run(&pool, run.id).await.expect("read");
-    assert!(read.ended_at.is_none(), "the run is still in flight");
+    assert!(
+        read.ended_at.is_none(),
+        "an interrupted run is not a completed record"
+    );
+
+    // A later run of the same request is unaffected by the orphan.
+    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    seed_asset(&pool, "TICKER:XNAS", "AAPL").await;
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    provider.answers("TICKER:XNAS:AAPL", range_for("yahoo_finance", date));
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_load(
+        Some(&pool),
+        &registry,
+        IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
+            as_of_date: date,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+        },
+    )
+    .await
+    .expect("report");
+
+    assert_eq!(report.loaded, 1);
+    let completed = get_load_run(&pool, report.run_id.expect("run id"))
+        .await
+        .expect("read");
+    assert!(completed.ended_at.is_some(), "the new run is complete");
+}
+
+/// A re-load on a later day stores a second row and keeps the history.
+#[tokio::test]
+async fn later_day_reload_stores_a_second_row_and_keeps_history() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    let later = NaiveDate::from_ymd_opt(2026, 10, 27).expect("date");
+    let asset_id = seed_asset(&pool, "TICKER:XNAS", "AAPL").await;
+
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    provider.answers("TICKER:XNAS:AAPL", range_for("yahoo_finance", date));
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    run_identifier_load(
+        Some(&pool),
+        &registry,
+        IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
+            as_of_date: date,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+        },
+    )
+    .await
+    .expect("first run");
+
+    // The later run carries a later knowledge date, so it is a new row.
+    let mut later_provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    later_provider.answers("TICKER:XNAS:AAPL", range_for("yahoo_finance", later));
+    let later_registry =
+        DataSourceRegistry::new(vec![later_provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_load(
+        Some(&pool),
+        &later_registry,
+        IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
+            as_of_date: later,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+        },
+    )
+    .await
+    .expect("later run");
+
+    assert_eq!(report.loaded, 1);
+    assert_eq!(count_rows(&pool, asset_id, later).await, 1);
+    // The earlier row remains readable as history.
+    assert_eq!(count_rows(&pool, asset_id, date).await, 1);
+}
+
+/// Two concurrent same-day loads leave exactly one row for the key: the
+/// loser reports `no_op`, never an error (research D12).
+#[tokio::test]
+async fn concurrent_same_day_loads_leave_one_row() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    let asset_id = seed_asset(&pool, "TICKER:XNAS", "AAPL").await;
+
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER:*"], 10);
+    provider.answers("TICKER:XNAS:AAPL", range_for("yahoo_finance", date));
+    let registry =
+        std::sync::Arc::new(DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry"));
+
+    let config = IdentifierLoadConfig {
+        identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
+        as_of_date: date,
+        preferred_source: None,
+        trigger: "test".into(),
+        dry_run: false,
+    };
+
+    let first = {
+        let pool = pool.clone();
+        let registry = registry.clone();
+        let config = config.clone();
+        tokio::spawn(async move { run_identifier_load(Some(&pool), &registry, config).await })
+    };
+    let second = {
+        let pool = pool.clone();
+        let registry = registry.clone();
+        let config = config.clone();
+        tokio::spawn(async move { run_identifier_load(Some(&pool), &registry, config).await })
+    };
+
+    let first = first.await.expect("join").expect("first report");
+    let second = second.await.expect("join").expect("second report");
+
+    // Exactly one row exists for the dual-temporal key.
+    assert_eq!(count_rows(&pool, asset_id, date).await, 1);
+    // Neither run failed: the loser is an idempotent no-op.
+    assert!(first.identifiers[0].outcome != LoadOutcome::StorageFailure);
+    assert!(second.identifiers[0].outcome != LoadOutcome::StorageFailure);
+    assert!(
+        first.identifiers[0].outcome == LoadOutcome::Loaded
+            || second.identifiers[0].outcome == LoadOutcome::Loaded,
+        "one of the two runs wrote the row"
+    );
 }
 
 /// The stored run record agrees with the report's counters.
@@ -426,13 +569,14 @@ async fn stored_counters_equal_the_report_counters() {
     let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
 
     let report = run_identifier_load(
-        &pool,
+        Some(&pool),
         &registry,
         IdentifierLoadConfig {
             identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
             as_of_date: date,
             preferred_source: None,
             trigger: "test".into(),
+            dry_run: false,
         },
     )
     .await
@@ -464,13 +608,14 @@ async fn per_identifier_outcomes_round_trip_through_jsonb() {
     let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
 
     let report = run_identifier_load(
-        &pool,
+        Some(&pool),
         &registry,
         IdentifierLoadConfig {
             identifiers: vec![TypedIdentifier::new("TICKER:XNAS", "AAPL")],
             as_of_date: date,
             preferred_source: None,
             trigger: "test".into(),
+            dry_run: false,
         },
     )
     .await

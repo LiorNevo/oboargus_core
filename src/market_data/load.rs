@@ -222,6 +222,9 @@ pub struct IdentifierLoadConfig {
     pub preferred_source: Option<String>,
     /// Audit trigger: `"cli"`, `"api"` or `"test"`.
     pub trigger: String,
+    /// When `true`, the load computes the report but persists nothing at
+    /// all — no reference-data rows and no run record (FR-008).
+    pub dry_run: bool,
 }
 
 /// The execution report returned by every load call.
@@ -293,9 +296,14 @@ enum StoreOutcome {
 /// time (NFR-003). Per-identifier failures are outcomes, not errors: only
 /// caller-input validation and an audit-write failure return `Err`.
 ///
+/// A **dry run** (`config.dry_run`) persists nothing at all — no
+/// reference-data rows and no run record — and its report carries an
+/// empty run id (FR-008). A dry run needs no database pool; every other
+/// mode does.
+///
 /// Implements FR-001..FR-006, FR-008 and FR-013 of spec 018.
 pub async fn run_identifier_load(
-    pool: &sqlx::PgPool,
+    pool: Option<&sqlx::PgPool>,
     registry: &DataSourceRegistry,
     config: IdentifierLoadConfig,
 ) -> Result<IdentifierLoadReport, MarketDataProviderError> {
@@ -305,6 +313,20 @@ pub async fn run_identifier_load(
     let (unique, duplicated) = dedupe_identifiers(config.identifiers.clone());
 
     let started_at = Utc::now();
+
+    if config.dry_run {
+        // A dry run persists nothing at all — no reference-data rows and no
+        // run record — and its report carries an empty run id (FR-008).
+        let report = dry_run_report(&unique, requested_raw, duplicated, &config);
+        return Ok(report);
+    }
+
+    let pool = pool.ok_or_else(|| {
+        MarketDataProviderError::Infrastructure(
+            "the load operation needs a database pool (a dry run does not)".into(),
+        )
+    })?;
+
     let run_row = start_load_run(pool, &config.trigger, config.preferred_source.as_deref()).await?;
 
     let mut counters = DataSourceLoadCounters::default();
@@ -359,6 +381,58 @@ pub async fn run_identifier_load(
         started_at,
         ended_at,
     ))
+}
+
+/// Builds the report of a dry run.
+///
+/// The dry run resolves the identifiers and reports what *would* happen,
+/// but persists nothing — no reference-data rows and no run record — and
+/// carries an empty run id (FR-008, contract I-5).
+///
+/// Implements FR-008 of spec 018.
+fn dry_run_report(
+    unique: &[TypedIdentifier],
+    requested_raw: usize,
+    duplicated: usize,
+    config: &IdentifierLoadConfig,
+) -> IdentifierLoadReport {
+    let now = Utc::now();
+    let lines: Vec<LoadIdentifierOutcome> = unique
+        .iter()
+        .map(|identifier| LoadIdentifierOutcome {
+            identifier: identifier.clone(),
+            asset_id: None,
+            attempted: false,
+            outcome: LoadOutcome::NotResolved,
+            source_id: None,
+            per_source: Vec::new(),
+        })
+        .collect();
+
+    IdentifierLoadReport {
+        report_version: 1,
+        run_id: None,
+        requested_source: config.preferred_source.clone(),
+        status: RunStatus::Complete,
+        identifiers_requested_raw: requested_raw,
+        identifiers_duplicated: duplicated,
+        identifiers_attempted: 0,
+        loaded: 0,
+        no_op: 0,
+        not_resolved: 0,
+        no_data_for_date: 0,
+        unsupported_scheme: 0,
+        rejected: 0,
+        source_unavailable: 0,
+        rate_limited: 0,
+        storage_failure: 0,
+        per_source_attempted: BTreeMap::new(),
+        per_source_failed: BTreeMap::new(),
+        identifiers: lines,
+        started_at: now,
+        ended_at: now,
+        duration_ms: 0,
+    }
 }
 
 /// Resolves, fetches, classifies and stores one identifier.
@@ -1160,6 +1234,7 @@ mod tests {
             as_of_date: Utc::now().date_naive(),
             preferred_source: None,
             trigger: "test".into(),
+            dry_run: false,
         };
         let error = validate_request(&config, &registry).expect_err("validation error");
         assert!(matches!(error, MarketDataProviderError::Validation(_)));
@@ -1178,6 +1253,7 @@ mod tests {
             as_of_date: Utc::now().date_naive(),
             preferred_source: Some("not_configured".into()),
             trigger: "test".into(),
+            dry_run: false,
         };
         let error = validate_request(&config, &registry).expect_err("validation error");
         assert!(matches!(error, MarketDataProviderError::Validation(_)));
@@ -1196,6 +1272,7 @@ mod tests {
             as_of_date: Utc::now().date_naive(),
             preferred_source: Some("mock".into()),
             trigger: "test".into(),
+            dry_run: false,
         };
         assert!(validate_request(&config, &registry).is_ok());
     }
@@ -1411,6 +1488,213 @@ mod tests {
 
         let answered = registry.walk_historical_range(request("MSFT"), None).await;
         assert!(answered.range.is_some(), "the batch continues");
+    }
+
+    /// Every outcome increments exactly its own bucket.
+    #[test]
+    fn counters_increment_exactly_one_bucket_each() {
+        let mut counters = DataSourceLoadCounters::default();
+        counters.increment(LoadOutcome::Loaded);
+        counters.increment(LoadOutcome::NoOp);
+        counters.increment(LoadOutcome::NotResolved);
+        counters.increment(LoadOutcome::NoDataForDate);
+        counters.increment(LoadOutcome::UnsupportedScheme);
+        counters.increment(LoadOutcome::Rejected);
+        counters.increment(LoadOutcome::SourceUnavailable);
+        counters.increment(LoadOutcome::RateLimited);
+        counters.increment(LoadOutcome::StorageFailure);
+
+        assert_eq!(counters.loaded, 1);
+        assert_eq!(counters.no_op, 1);
+        assert_eq!(counters.not_resolved, 1);
+        assert_eq!(counters.no_data_for_date, 1);
+        assert_eq!(counters.unsupported_scheme, 1);
+        assert_eq!(counters.rejected, 1);
+        assert_eq!(counters.source_unavailable, 1);
+        assert_eq!(counters.rate_limited, 1);
+        assert_eq!(counters.storage_failure, 1);
+        // Nine identifiers: eight reached the fetch stage, one did not
+        // (`not_resolved` is outside the attempted partition).
+        assert_eq!(counters.total_attempted(), 8);
+        assert_eq!(counters.total_requested(), 9);
+        assert_eq!(counters.total_failed(), 4);
+    }
+
+    /// The counters start empty.
+    #[test]
+    fn counters_start_at_zero() {
+        let counters = DataSourceLoadCounters::default();
+        assert_eq!(counters.total_attempted(), 0);
+        assert_eq!(counters.total_requested(), 0);
+        assert_eq!(counters.total_failed(), 0);
+    }
+
+    /// The report's counters come from the run's counters, and the
+    /// requested/duplicated sizes are carried through unchanged.
+    #[test]
+    fn report_counters_come_from_the_run_counters() {
+        let counters = DataSourceLoadCounters {
+            loaded: 2,
+            no_op: 1,
+            not_resolved: 1,
+            no_data_for_date: 1,
+            unsupported_scheme: 1,
+            rejected: 1,
+            source_unavailable: 1,
+            rate_limited: 1,
+            storage_failure: 1,
+        };
+        let now = Utc::now();
+        let report = build_report(
+            &counters,
+            Vec::new(),
+            Some(Uuid::nil()),
+            None,
+            11,
+            2,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            now,
+            now,
+        );
+        assert_eq!(report.loaded, 2);
+        assert_eq!(report.no_op, 1);
+        assert_eq!(report.not_resolved, 1);
+        assert_eq!(report.no_data_for_date, 1);
+        assert_eq!(report.unsupported_scheme, 1);
+        assert_eq!(report.rejected, 1);
+        assert_eq!(report.source_unavailable, 1);
+        assert_eq!(report.rate_limited, 1);
+        assert_eq!(report.storage_failure, 1);
+        assert_eq!(report.identifiers_attempted, 9);
+        assert_eq!(report.identifiers_requested_raw, 11);
+        assert_eq!(report.identifiers_duplicated, 2);
+        assert_eq!(report.status, RunStatus::Partial);
+        assert_eq!(report.run_id, Some(Uuid::nil()));
+    }
+
+    /// The report's per-source maps are carried through unchanged.
+    #[test]
+    fn report_carries_the_per_source_maps() {
+        let counters = DataSourceLoadCounters::default();
+        let now = Utc::now();
+        let mut attempted = BTreeMap::new();
+        attempted.insert("yahoo_finance".to_string(), 3usize);
+        let mut failed = BTreeMap::new();
+        failed.insert("yahoo_finance".to_string(), 1usize);
+        let report = build_report(
+            &counters,
+            Vec::new(),
+            None,
+            None,
+            0,
+            0,
+            attempted,
+            failed,
+            now,
+            now,
+        );
+        assert_eq!(report.per_source_attempted.get("yahoo_finance"), Some(&3));
+        assert_eq!(report.per_source_failed.get("yahoo_finance"), Some(&1));
+    }
+
+    /// A scheme no enabled source supports is the `unsupported_scheme` case:
+    /// the registry was consulted (attempted) but no source was contacted.
+    #[tokio::test]
+    async fn unsupported_scheme_yields_unsupported_scheme() {
+        let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+        let provider = MockLoadProvider::new("ticker_source", &["TICKER"], 10);
+        let registry = registry_with(vec![
+            Arc::new(provider) as Arc<dyn MarketDataProvider + Send + Sync>
+        ]);
+
+        let walk = registry
+            .walk_historical_range(
+                HistoricalRangeRequest {
+                    identifier: TypedIdentifier::new("ISIN", "US0378331005"),
+                    from: date,
+                    to: date,
+                },
+                None,
+            )
+            .await;
+
+        assert!(walk.failures.is_empty(), "no source was contacted");
+        assert_eq!(classify_walk_failure(&walk), LoadOutcome::UnsupportedScheme);
+    }
+
+    /// An upstream that answers "no value for that date" is the
+    /// `no_data_for_date` case.
+    #[tokio::test]
+    async fn upstream_not_found_yields_no_data_for_date() {
+        let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+        let mut provider = MockLoadProvider::new("mock", &["TICKER"], 10);
+        provider.fails(
+            "TICKER:AAPL",
+            MarketDataProviderError::NotFound("no session for that date".into()),
+        );
+        let registry = registry_with(vec![
+            Arc::new(provider) as Arc<dyn MarketDataProvider + Send + Sync>
+        ]);
+
+        let walk = registry
+            .walk_historical_range(
+                HistoricalRangeRequest {
+                    identifier: TypedIdentifier::new("TICKER", "AAPL"),
+                    from: date,
+                    to: date,
+                },
+                None,
+            )
+            .await;
+
+        assert_eq!(classify_walk_failure(&walk), LoadOutcome::NoDataForDate);
+    }
+
+    /// A dry run persists nothing and carries an empty run id (FR-008).
+    #[tokio::test]
+    async fn a_dry_run_persists_nothing() {
+        let registry = registry_with(vec![Arc::new(MockLoadProvider::new(
+            "mock",
+            &["TICKER"],
+            10,
+        ))]);
+        let config = IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER", "AAPL")],
+            as_of_date: Utc::now().date_naive(),
+            preferred_source: None,
+            trigger: "cli".into(),
+            dry_run: true,
+        };
+
+        // No pool is needed for a dry run.
+        let report = run_identifier_load(None, &registry, config)
+            .await
+            .expect("report");
+        assert!(report.run_id.is_none(), "a dry run has no run record");
+        assert_eq!(report.identifiers.len(), 1);
+    }
+
+    /// A non-dry run without a pool is an infrastructure error, not a
+    /// silent no-op.
+    #[tokio::test]
+    async fn a_run_without_a_pool_is_an_error() {
+        let registry = registry_with(vec![Arc::new(MockLoadProvider::new(
+            "mock",
+            &["TICKER"],
+            10,
+        ))]);
+        let config = IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER", "AAPL")],
+            as_of_date: Utc::now().date_naive(),
+            preferred_source: None,
+            trigger: "cli".into(),
+            dry_run: false,
+        };
+        let error = run_identifier_load(None, &registry, config)
+            .await
+            .expect_err("err");
+        assert!(matches!(error, MarketDataProviderError::Infrastructure(_)));
     }
 
     // ---------- T027 (report): the report carries its schema version ----------
