@@ -69,6 +69,7 @@ pub struct IdentifierRangeLoadConfig {
 ///
 /// Implements FR-014 of spec 018.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DateLoadSection {
     /// The date this section covers.
     pub date: NaiveDate,
@@ -84,6 +85,7 @@ pub struct DateLoadSection {
 ///
 /// Implements FR-014 / FR-016 of spec 018.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RangeLoadTotals {
     /// Unique identifier-lines that reached the fetch stage.
     pub identifiers_attempted: usize,
@@ -115,6 +117,7 @@ pub struct RangeLoadTotals {
 ///
 /// Implements FR-014 of spec 018.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct IdentifierRangeLoadReport {
     /// The report schema version (FR-007). Currently `1`.
     pub report_version: u32,

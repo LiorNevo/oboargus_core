@@ -64,6 +64,7 @@ pub const DEFAULT_ASSET_CURRENCY: &str = "USD";
 /// Implements FR-005 of spec 018.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum LoadOutcome {
     /// A reference-data row was written.
     Loaded,
@@ -104,6 +105,7 @@ pub enum LoadOutcome {
 /// Implements FR-016 of spec 018.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case", tag = "status")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AssetCreation {
     /// Creation was not asked for (`create_missing_assets` was off).
     #[default]
@@ -141,6 +143,7 @@ pub enum AssetCreation {
 /// Implements FR-015 of spec 018.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum CurrencySource {
     /// The upstream lookup returned a currency.
     Upstream,
@@ -155,6 +158,7 @@ pub enum CurrencySource {
 /// Implements FR-015 of spec 018.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum CreationDecline {
     /// The identifier's scheme is not `TICKER` / `TICKER:*`; v1 only
     /// creates ticker-named instruments.
@@ -179,6 +183,7 @@ pub enum CreationDecline {
 ///
 /// Implements FR-006 of spec 018.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceOutcome {
     /// The stable id of the source that was consulted.
     pub source_id: String,
@@ -194,6 +199,7 @@ pub struct SourceOutcome {
 ///
 /// Implements FR-006 of spec 018.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LoadIdentifierOutcome {
     /// The identifier as received (normalized scheme/value pair).
     pub identifier: TypedIdentifier,
@@ -235,6 +241,7 @@ pub struct LoadIdentifierOutcome {
 /// Implements FR-006 of spec 018.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum RunStatus {
     /// No identifier ended in a failure bucket.
     Complete,
@@ -363,6 +370,7 @@ pub struct IdentifierLoadConfig {
 ///
 /// Implements FR-006 / FR-007 of spec 018.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct IdentifierLoadReport {
     /// The report schema version (FR-007). Currently `1`.
     pub report_version: u32,

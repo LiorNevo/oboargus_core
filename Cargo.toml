@@ -18,6 +18,10 @@ thiserror = "2.0"
 async-trait = "0.1"
 futures = "0.3"
 tracing.workspace = true
+utoipa = { workspace = true, optional = true }
+
+[features]
+openapi = ["dep:utoipa"]
 
 # Integration tests under `tests/` link against the crate as an external
 # crate, so anything they `use` directly must also be a dev-dependency.

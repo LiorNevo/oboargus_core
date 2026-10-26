@@ -22,6 +22,7 @@ use crate::market_data::types::{
 ///
 /// Returned by [`DataSourceRegistry::enumerate_sources`] (FR-002).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceDescriptor {
     /// Stable id (e.g. `"yahoo_finance"`).
     pub source_id: String,

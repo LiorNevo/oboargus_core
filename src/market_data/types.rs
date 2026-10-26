@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 /// **type**; the stored representation calls it the `scheme`. One concept,
 /// two names (spec 018 FR-002).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TypedIdentifier {
     /// Scheme (open vocabulary; matched case-sensitively per registry rules).
     pub scheme: String,
@@ -136,6 +137,7 @@ pub struct HistoricalRange {
 ///
 /// Implements FR-012 of spec 017 (US2).
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TickerLookupHit {
     /// Raw ticker symbol (e.g. `"MSFT"`).
     pub symbol: String,
@@ -151,6 +153,7 @@ pub struct TickerLookupHit {
     /// requires a separate quote-summary call. Surfaces as `None` in v1.
     pub currency: Option<String>,
     /// Additional identifier schemes returned by the upstream (e.g. an ISIN).
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<Vec<String>>))]
     pub schemes: Vec<(String, String)>,
     /// Relevance score (Yahoo's `score`). Higher is more relevant.
     pub relevance: Option<f64>,
