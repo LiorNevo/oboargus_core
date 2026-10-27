@@ -109,8 +109,8 @@ async fn delete_asset_rejects_an_asset_with_reference_data() {
 
     sqlx::query(
         "INSERT INTO asset_reference_data \
-         (id, asset_id, fact_type, as_of_date, knowledge_date, value, source) \
-         VALUES (gen_random_uuid(), $1, 'market_price', CURRENT_DATE, CURRENT_DATE, '{}', 'test')",
+         (id, asset_id, fact_type, valid_at, known_at, value, source) \
+         VALUES (gen_random_uuid(), $1, 'market_price', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}', 'test')",
     )
     .bind(asset.id)
     .execute(&pool)
@@ -482,8 +482,8 @@ async fn delete_issuer_rejects_an_issuer_with_reference_data() {
 
     sqlx::query(
         "INSERT INTO issuer_reference_data \
-         (id, issuer_id, fact_type, as_of_date, knowledge_date, value, source) \
-         VALUES (gen_random_uuid(), $1, 'lei', CURRENT_DATE, CURRENT_DATE, '{}', 'test')",
+         (id, issuer_id, fact_type, valid_at, known_at, value, source) \
+         VALUES (gen_random_uuid(), $1, 'lei', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}', 'test')",
     )
     .bind(issuer.id)
     .execute(&pool)

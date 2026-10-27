@@ -15,6 +15,12 @@ pub mod domain;
 /// Source-agnostic market data interface (see `specs/017-yahoo-data-source/spec.md`).
 pub mod market_data;
 
+/// Bitemporal market data and the intraday time model.
+///
+/// See `specs/021-bitemporal-market-data/spec.md`. Additive to [`domain`]:
+/// the per-entity `domain::*` functions keep their signatures and behavior.
+pub mod temporal;
+
 /// Helpers shared by the binary entrypoints in `src/bin/`.
 ///
 /// Extracted from `db_cleanup.rs`, `init_test_db.rs`, and

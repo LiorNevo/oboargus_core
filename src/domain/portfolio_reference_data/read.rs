@@ -6,48 +6,55 @@ use crate::domain::error::DomainError;
 use crate::domain::id::PortfolioId;
 use crate::domain::portfolio_reference_data::entity::PortfolioReferenceData;
 
-/// Implements FR-006 of spec 016-implement-domain-model.
+/// The value in force for `(portfolio, fact_type, as_of_date)` under the latest
+/// knowledge, or `None` when the latest belief is a retraction.
+///
+/// Implements FR-006 of spec 016-implement-domain-model and FR-005/FR-006 of
+/// spec 021-bitemporal-market-data.
 pub async fn get_current_portfolio_reference_data(
     pool: &PgPool,
     portfolio_id: PortfolioId,
     fact_type: &str,
     as_of_date: NaiveDate,
 ) -> Result<Option<PortfolioReferenceData>, DomainError> {
-    let row: Option<PortfolioReferenceData> = sqlx::query_as(
-        r#"
+    let sql = r#"
         SELECT id, portfolio_id, fact_type, as_of_date, knowledge_date, value, source
         FROM portfolio_reference_data
         WHERE portfolio_id = $1 AND fact_type = $2 AND as_of_date = $3
-        ORDER BY knowledge_date DESC LIMIT 1
-        "#,
-    )
-    .bind(portfolio_id.as_uuid())
-    .bind(fact_type)
-    .bind(as_of_date)
-    .fetch_optional(pool)
-    .await?;
+          AND NOT retracted
+        ORDER BY known_at DESC, id DESC LIMIT 1
+        "#;
+    let row: Option<PortfolioReferenceData> = sqlx::query_as(sql)
+        .bind(portfolio_id.as_uuid())
+        .bind(fact_type)
+        .bind(as_of_date)
+        .fetch_optional(pool)
+        .await?;
     Ok(row)
 }
 
-/// Implements FR-006 of spec 016-implement-domain-model.
+/// Every recorded belief for `(portfolio, fact_type, as_of_date)`, newest
+/// knowledge first.
+///
+/// Implements FR-006 of spec 016-implement-domain-model and FR-007 of
+/// spec 021-bitemporal-market-data.
 pub async fn get_portfolio_reference_data_history(
     pool: &PgPool,
     portfolio_id: PortfolioId,
     fact_type: &str,
     as_of_date: NaiveDate,
 ) -> Result<Vec<PortfolioReferenceData>, DomainError> {
-    let rows: Vec<PortfolioReferenceData> = sqlx::query_as(
-        r#"
+    let sql = r#"
         SELECT id, portfolio_id, fact_type, as_of_date, knowledge_date, value, source
         FROM portfolio_reference_data
         WHERE portfolio_id = $1 AND fact_type = $2 AND as_of_date = $3
-        ORDER BY knowledge_date DESC
-        "#,
-    )
-    .bind(portfolio_id.as_uuid())
-    .bind(fact_type)
-    .bind(as_of_date)
-    .fetch_all(pool)
-    .await?;
+        ORDER BY known_at DESC, id DESC
+        "#;
+    let rows: Vec<PortfolioReferenceData> = sqlx::query_as(sql)
+        .bind(portfolio_id.as_uuid())
+        .bind(fact_type)
+        .bind(as_of_date)
+        .fetch_all(pool)
+        .await?;
     Ok(rows)
 }

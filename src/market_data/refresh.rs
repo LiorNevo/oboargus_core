@@ -15,9 +15,9 @@ use uuid::Uuid;
 use crate::domain::asset_identifier::read as asset_identifier_read;
 use crate::domain::asset_reference_data::create as asset_reference_data_create;
 use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
-use crate::domain::asset_reference_data::read as asset_reference_data_read;
 use crate::domain::id::AssetId;
 use crate::domain::id::DomainId;
+use crate::domain::time_support::{now_micros, one_microsecond_after, utc_midnight};
 use crate::market_data::audit::{DataSourceRefreshCounters, finish_refresh_run, start_refresh_run};
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::registry::DataSourceRegistry;
@@ -151,28 +151,39 @@ pub async fn run_refresh(
                 .entry(latest.source_id.clone())
                 .or_insert(0) += 1;
 
-            // Idempotency (FR-031): the predecessor's table is unique on
-            // `(asset_id, fact_type, as_of_date, knowledge_date)`, so a
-            // re-run on the same trading day would violate that
-            // constraint. Detect the already-known fact *before* writing
-            // and count it as a no-op instead. No `ON CONFLICT` is used —
-            // the latest-`knowledge_date`-wins rule does the work
-            // (research D6).
-            if is_already_known(pool, asset_id, latest.bar.as_of_date, latest.knowledge_date).await
+            // Idempotency (FR-031 of spec 017, FR-010 of spec 021): a
+            // re-run that produces the SAME value for the same source is a
+            // no-op. A same-day correction with a different value is a
+            // revision and must be stored, so the comparison is on the
+            // payload - not on the calendar date.
+            let current =
+                current_belief(pool, asset_id, latest.bar.as_of_date, &latest.source_id).await;
+            if current
+                .as_ref()
+                .is_some_and(|(value, _)| value == &value_payload)
             {
                 counters.no_op += 1;
                 continue;
             }
 
+            let known_at = match current {
+                Some((_, winner)) if Utc::now() <= winner => one_microsecond_after(winner),
+                _ => now_micros(),
+            };
+
             let new_row = NewAssetReferenceData {
                 asset_id,
                 fact_type: FACT_TYPE_MARKET_PRICE.to_string(),
                 as_of_date: latest.bar.as_of_date,
-                knowledge_date: latest.knowledge_date,
+                knowledge_date: known_at.date_naive(),
                 value: value_payload,
                 source: latest.source_id.clone(),
             };
-            match asset_reference_data_create::create_asset_reference_data(pool, new_row).await {
+            match asset_reference_data_create::create_asset_reference_data_with_known_at(
+                pool, new_row, known_at,
+            )
+            .await
+            {
                 Ok(_) => counters.refreshed += 1,
                 Err(e) => {
                     tracing::warn!(asset_id = %asset_id, error = %e, "asset_reference_data write failed");
@@ -207,39 +218,40 @@ pub async fn run_refresh(
     })
 }
 
-/// Whether the fact is already recorded with the same `knowledge_date`.
+/// The current belief for `(asset, market_price, valid day, source)`:
+/// its payload and its precise transaction time.
 ///
-/// The predecessor's `asset_reference_data` table is unique on
-/// `(asset_id, fact_type, as_of_date, knowledge_date)`. A refresh re-run on
-/// the same trading day would therefore violate that constraint. This
-/// helper detects the already-known fact so the run can be recorded as a
-/// no-op instead of a write failure (FR-031).
-///
-/// The "current" row is the one with the greatest `knowledge_date`; if it
-/// already carries the incoming `knowledge_date`, the fact is known.
-async fn is_already_known(
+/// Implements FR-031 of spec 017 and FR-010 of spec 021.
+async fn current_belief(
     pool: &sqlx::PgPool,
     asset_id: AssetId,
     as_of_date: NaiveDate,
-    knowledge_date: NaiveDate,
-) -> bool {
-    match asset_reference_data_read::get_current_asset_reference_data(
-        pool,
-        asset_id,
-        FACT_TYPE_MARKET_PRICE,
-        as_of_date,
+    source: &str,
+) -> Option<(String, chrono::DateTime<Utc>)> {
+    match sqlx::query_as::<_, (String, chrono::DateTime<Utc>)>(
+        r#"
+        SELECT value, known_at
+        FROM asset_reference_data
+        WHERE asset_id = $1 AND fact_type = $2 AND valid_at = $3 AND source = $4
+          AND NOT retracted
+        ORDER BY known_at DESC, id DESC LIMIT 1
+        "#,
     )
+    .bind(asset_id.as_uuid())
+    .bind(FACT_TYPE_MARKET_PRICE)
+    .bind(utc_midnight(as_of_date))
+    .bind(source)
+    .fetch_optional(pool)
     .await
     {
-        Ok(Some(existing)) => existing.knowledge_date >= knowledge_date,
-        Ok(None) => false,
+        Ok(row) => row,
         Err(error) => {
             tracing::warn!(
                 asset_id = %asset_id,
                 error = %error,
                 "could not read the current reference-data row; assuming the fact is new"
             );
-            false
+            None
         }
     }
 }

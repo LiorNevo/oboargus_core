@@ -30,9 +30,10 @@ use crate::domain::asset::entity::{Asset, NewAsset};
 use crate::domain::asset_identifier::read as asset_identifier_read;
 use crate::domain::asset_reference_data::create as asset_reference_data_create;
 use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
-use crate::domain::asset_reference_data::read as asset_reference_data_read;
 use crate::domain::error::DomainError;
 use crate::domain::id::AssetId;
+use crate::domain::id::DomainId;
+use crate::domain::time_support::{now_micros, one_microsecond_after, utc_midnight};
 use crate::market_data::audit::{finish_load_run, start_load_run};
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::registry::{DataSourceRegistry, TickerLookupMatch, TickerLookupWalk};
@@ -1334,17 +1335,10 @@ async fn store_bar(
     pool: &sqlx::PgPool,
     asset_id: AssetId,
     bar: PriceBar,
-    knowledge_date: NaiveDate,
+    _knowledge_date: NaiveDate,
     source_id: &str,
     as_of_date: NaiveDate,
 ) -> StoreOutcome {
-    // The idempotence pre-check (research D12): the dual-temporal unique key
-    // is `(asset_id, fact_type, as_of_date, knowledge_date)`, so a same-day
-    // re-load must not write a second row for it.
-    if is_already_known(pool, asset_id, as_of_date, knowledge_date).await {
-        return StoreOutcome::NoOp;
-    }
-
     let value_payload = match serde_json::to_string(&serialize_bar(&bar)) {
         Ok(payload) => payload,
         Err(error) => {
@@ -1353,29 +1347,46 @@ async fn store_bar(
         }
     };
 
+    // Idempotency (research D12 of spec 018, FR-010 of spec 021): the same
+    // payload for the same source is a no-op; a different payload is a
+    // correction and is appended with a fresh transaction time.
+    let current = current_belief(pool, asset_id, as_of_date, source_id).await;
+    if current
+        .as_ref()
+        .is_some_and(|(value, _)| value == &value_payload)
+    {
+        return StoreOutcome::NoOp;
+    }
+
+    let known_at = match current {
+        Some((_, winner)) if Utc::now() <= winner => one_microsecond_after(winner),
+        _ => now_micros(),
+    };
+
     let new_row = NewAssetReferenceData {
         asset_id,
         fact_type: FACT_TYPE_MARKET_PRICE.to_string(),
         as_of_date: bar.as_of_date,
-        knowledge_date,
-        value: value_payload,
+        knowledge_date: known_at.date_naive(),
+        value: value_payload.clone(),
         source: source_id.to_string(),
     };
 
-    match asset_reference_data_create::create_asset_reference_data(pool, new_row).await {
+    match asset_reference_data_create::create_asset_reference_data_with_known_at(
+        pool, new_row, known_at,
+    )
+    .await
+    {
         Ok(_) => StoreOutcome::Loaded,
         Err(error) => {
             if is_unique_violation(&error) {
                 // A concurrent load wrote the identical fact first: re-read
                 // the current row to tell an idempotent no-op from a real
                 // storage failure (research D12).
-                return if current_row_carries_knowledge_date(
-                    pool,
-                    asset_id,
-                    as_of_date,
-                    knowledge_date,
-                )
-                .await
+                return if current_belief(pool, asset_id, as_of_date, source_id)
+                    .await
+                    .as_ref()
+                    .is_some_and(|(value, _)| value == &value_payload)
                 {
                     StoreOutcome::NoOp
                 } else {
@@ -1388,62 +1399,40 @@ async fn store_bar(
     }
 }
 
-/// Whether the current row for the fact already carries the knowledge date.
+/// The current belief for `(asset, market_price, valid day, source)`:
+/// its payload and its precise transaction time.
 ///
-/// Implements FR-004 of spec 018 (research D12).
-async fn is_already_known(
+/// Implements research D12 of spec 018 and FR-010 of spec 021.
+async fn current_belief(
     pool: &sqlx::PgPool,
     asset_id: AssetId,
     as_of_date: NaiveDate,
-    knowledge_date: NaiveDate,
-) -> bool {
-    match asset_reference_data_read::get_current_asset_reference_data(
-        pool,
-        asset_id,
-        FACT_TYPE_MARKET_PRICE,
-        as_of_date,
+    source: &str,
+) -> Option<(String, chrono::DateTime<Utc>)> {
+    match sqlx::query_as::<_, (String, chrono::DateTime<Utc>)>(
+        r#"
+        SELECT value, known_at
+        FROM asset_reference_data
+        WHERE asset_id = $1 AND fact_type = $2 AND valid_at = $3 AND source = $4
+          AND NOT retracted
+        ORDER BY known_at DESC, id DESC LIMIT 1
+        "#,
     )
+    .bind(asset_id.as_uuid())
+    .bind(FACT_TYPE_MARKET_PRICE)
+    .bind(utc_midnight(as_of_date))
+    .bind(source)
+    .fetch_optional(pool)
     .await
     {
-        Ok(Some(existing)) => existing.knowledge_date >= knowledge_date,
-        Ok(None) => false,
+        Ok(row) => row,
         Err(error) => {
             tracing::warn!(
                 asset_id = %asset_id,
                 error = %error,
                 "could not read the current reference-data row; assuming the fact is new"
             );
-            false
-        }
-    }
-}
-
-/// Whether the current row for the fact carries the intended knowledge date.
-///
-/// Implements FR-004 of spec 018 (research D12).
-async fn current_row_carries_knowledge_date(
-    pool: &sqlx::PgPool,
-    asset_id: AssetId,
-    as_of_date: NaiveDate,
-    knowledge_date: NaiveDate,
-) -> bool {
-    match asset_reference_data_read::get_current_asset_reference_data(
-        pool,
-        asset_id,
-        FACT_TYPE_MARKET_PRICE,
-        as_of_date,
-    )
-    .await
-    {
-        Ok(Some(existing)) => existing.knowledge_date == knowledge_date,
-        Ok(None) => false,
-        Err(error) => {
-            tracing::warn!(
-                asset_id = %asset_id,
-                error = %error,
-                "could not re-read the current reference-data row after a collision"
-            );
-            false
+            None
         }
     }
 }

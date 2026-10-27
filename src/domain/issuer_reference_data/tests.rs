@@ -191,3 +191,56 @@ fn entity_accessors_return_wrapped_id_types() {
     assert_eq!(row.id().as_uuid(), id);
     assert_eq!(row.issuer_id().as_uuid(), issuer_id);
 }
+
+#[tokio::test]
+async fn two_same_day_updates_both_succeed_and_both_are_retrievable() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    let issuer_id = new_issuer(&pool).await;
+    let today = Utc::now().date_naive();
+    create_issuer_reference_data(
+        &pool,
+        NewIssuerReferenceData {
+            issuer_id,
+            fact_type: "price".into(),
+            as_of_date: today,
+            knowledge_date: today,
+            value: "first".into(),
+            source: "s".into(),
+        },
+    )
+    .await
+    .expect("initial");
+
+    // The pre-021 model keyed knowledge on a DATE, so the second call would
+    // have collided with the first. Both must now be stored.
+    update_issuer_reference_value(
+        &pool,
+        issuer_id,
+        "price",
+        today,
+        "second".into(),
+        "s".into(),
+    )
+    .await
+    .expect("first same-day correction");
+    update_issuer_reference_value(&pool, issuer_id, "price", today, "third".into(), "s".into())
+        .await
+        .expect("second same-day correction");
+
+    let history = get_issuer_reference_data_history(&pool, issuer_id, "price", today)
+        .await
+        .expect("history");
+    assert_eq!(history.len(), 3, "same-day corrections must all be stored");
+    assert_eq!(history[0].value, "third");
+    assert_eq!(history[1].value, "second");
+    assert_eq!(history[2].value, "first");
+
+    let current = get_current_issuer_reference_data(&pool, issuer_id, "price", today)
+        .await
+        .expect("current")
+        .expect("present");
+    assert_eq!(current.value, "third");
+    guard.cleanup().await;
+}

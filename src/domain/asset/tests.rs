@@ -215,12 +215,12 @@ async fn delete_asset_with_reference_data_is_rejected() {
     .expect("create");
     // Insert a reference-data record directly.
     let today = chrono::Utc::now().date_naive();
-    sqlx::query("INSERT INTO asset_reference_data (id, asset_id, fact_type, as_of_date, knowledge_date, value, source) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+    sqlx::query("INSERT INTO asset_reference_data (id, asset_id, fact_type, valid_at, known_at, value, source) VALUES ($1, $2, $3, $4, $5, $6, $7)")
         .bind(uuid::Uuid::new_v4())
         .bind(asset.id)
         .bind("name")
-        .bind(today)
-        .bind(today)
+        .bind(crate::domain::time_support::utc_midnight(today))
+        .bind(crate::domain::time_support::utc_midnight(today))
         .bind("X")
         .bind("t")
         .execute(&pool).await.expect("insert ref data");

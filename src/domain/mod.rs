@@ -29,6 +29,7 @@ pub mod portfolio_reference_data;
 pub mod position;
 pub mod rule;
 pub mod seed;
+pub(crate) mod time_support;
 
 #[cfg(test)]
 mod tests;

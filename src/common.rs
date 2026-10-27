@@ -150,3 +150,101 @@ impl Drop for PoolGuard {
         }
     }
 }
+
+// =============================================================================
+// Bitemporal fixtures (spec 021)
+// =============================================================================
+
+/// Deterministic ids for the bitemporal seed, so assertions can name rows
+/// without re-reading them.
+pub mod temporal_ids {
+    use uuid::Uuid;
+
+    /// The seeded asset.
+    pub const ASSET: Uuid = Uuid::from_u128(0x0210_0000_0000_0000_0000_0000_0000_0001);
+    /// The seeded issuer.
+    pub const ISSUER: Uuid = Uuid::from_u128(0x0210_0000_0000_0000_0000_0000_0000_0002);
+    /// The seeded portfolio.
+    pub const PORTFOLIO: Uuid = Uuid::from_u128(0x0210_0000_0000_0000_0000_0000_0000_0003);
+    /// Revision 1 (oldest belief).
+    pub const FACT_V1: Uuid = Uuid::from_u128(0x0210_0000_0000_0000_0000_0000_0000_0011);
+    /// Revision 2, same valid day.
+    pub const FACT_V2: Uuid = Uuid::from_u128(0x0210_0000_0000_0000_0000_0000_0000_0012);
+    /// Revision 3, the retraction.
+    pub const FACT_RETRACT: Uuid = Uuid::from_u128(0x0210_0000_0000_0000_0000_0000_0000_0013);
+}
+
+/// Seeds one asset, one issuer, and one portfolio, plus three beliefs about
+/// one asset fact across two days, the last of which retracts it.
+///
+/// The fixture is DB-gated: callers reach it through [`tx_pool`], which
+/// returns `None` (and the test returns early) when neither
+/// `TEST_DATABASE_URL` nor `DATABASE_URL` is set.
+///
+/// Time coordinates: `valid_at` is `2026-01-02T00:00:00Z`; the three
+/// `known_at` values are `2026-01-02T12:00:00Z`, `2026-01-03T09:00:00Z`, and
+/// `2026-01-04T09:00:00Z`.
+pub async fn seed_temporal_fixture(pool: &PgPool) {
+    sqlx::query(
+        "INSERT INTO issuers (id, name, issuer_type, legal_jurisdiction) \
+         VALUES ($1, 'Temporal Issuer', 'CORPORATION', 'US')",
+    )
+    .bind(temporal_ids::ISSUER)
+    .execute(pool)
+    .await
+    .expect("seed issuer");
+
+    sqlx::query(
+        "INSERT INTO portfolios (id, name, purpose, created_by) \
+         VALUES ($1, 'Temporal Portfolio', 'testing', 'fixture')",
+    )
+    .bind(temporal_ids::PORTFOLIO)
+    .execute(pool)
+    .await
+    .expect("seed portfolio");
+
+    sqlx::query(
+        "INSERT INTO assets (id, asset_type, display_name, currency, issuer_id) \
+         VALUES ($1, 'stock', 'Temporal Asset', 'USD', $2)",
+    )
+    .bind(temporal_ids::ASSET)
+    .bind(temporal_ids::ISSUER)
+    .execute(pool)
+    .await
+    .expect("seed asset");
+
+    for (id, known_at, value, retracted) in [
+        (
+            temporal_ids::FACT_V1,
+            "2026-01-02T12:00:00Z",
+            "100.00",
+            false,
+        ),
+        (
+            temporal_ids::FACT_V2,
+            "2026-01-03T09:00:00Z",
+            "101.00",
+            false,
+        ),
+        (
+            temporal_ids::FACT_RETRACT,
+            "2026-01-04T09:00:00Z",
+            "delisted",
+            true,
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO asset_reference_data \
+                (id, asset_id, fact_type, valid_at, known_at, value, source, retracted) \
+             VALUES ($1, $2, 'market_price', '2026-01-02T00:00:00Z', $3, $4, 'fixture', $5)",
+        )
+        .bind(id)
+        .bind(temporal_ids::ASSET)
+        .bind(known_at)
+        .bind(value)
+        .bind(retracted)
+        .execute(pool)
+        .await
+        .expect("seed fact");
+    }
+}
