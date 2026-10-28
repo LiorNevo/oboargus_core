@@ -30,6 +30,8 @@ pub struct DataSourceRow {
     pub priority: i32,
     /// Identifier schemes the source can answer.
     pub supported_schemes: Vec<String>,
+    /// Data domains the source can serve.
+    pub supported_data_domains: Vec<String>,
     /// Per-source rate-limit budget (requests per minute), if any.
     pub rate_limit_per_minute: Option<i32>,
     /// Whether a credential was present at startup. Never the value.
@@ -55,22 +57,23 @@ pub async fn upsert_data_source(
     let row: DataSourceRow = sqlx::query_as(
         "INSERT INTO data_sources
             (id, source_id, display_name, provider_type, enabled, priority, supported_schemes,
-             rate_limit_per_minute, api_key_present, user_agent, timeout_seconds, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+             supported_data_domains, rate_limit_per_minute, api_key_present, user_agent,
+             timeout_seconds, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
          ON CONFLICT (source_id) DO UPDATE SET
             display_name = EXCLUDED.display_name,
             provider_type = EXCLUDED.provider_type,
-            enabled = EXCLUDED.enabled,
             priority = EXCLUDED.priority,
             supported_schemes = EXCLUDED.supported_schemes,
+            supported_data_domains = EXCLUDED.supported_data_domains,
             rate_limit_per_minute = EXCLUDED.rate_limit_per_minute,
             api_key_present = EXCLUDED.api_key_present,
             user_agent = EXCLUDED.user_agent,
             timeout_seconds = EXCLUDED.timeout_seconds,
             updated_at = NOW()
          RETURNING id, source_id, display_name, provider_type, enabled, priority,
-                   supported_schemes, rate_limit_per_minute, api_key_present, user_agent,
-                   timeout_seconds",
+                   supported_schemes, supported_data_domains, rate_limit_per_minute,
+                   api_key_present, user_agent, timeout_seconds",
     )
     .bind(id)
     .bind(&config.source_id)
@@ -79,6 +82,7 @@ pub async fn upsert_data_source(
     .bind(config.enabled)
     .bind(config.priority)
     .bind(&config.supported_schemes)
+    .bind(&config.supported_data_domains)
     .bind(config.rate_limit_per_minute.map(|v| v as i32))
     .bind(api_key_present)
     .bind(&config.user_agent)
@@ -98,8 +102,8 @@ pub async fn list_data_sources(
 ) -> Result<Vec<DataSourceRow>, MarketDataProviderError> {
     let rows = sqlx::query_as(
         "SELECT id, source_id, display_name, provider_type, enabled, priority,
-                supported_schemes, rate_limit_per_minute, api_key_present, user_agent,
-                timeout_seconds
+                supported_schemes, supported_data_domains, rate_limit_per_minute,
+                api_key_present, user_agent, timeout_seconds
          FROM data_sources ORDER BY source_id ASC",
     )
     .fetch_all(pool)

@@ -34,9 +34,12 @@ use crate::domain::error::DomainError;
 use crate::domain::id::AssetId;
 use crate::domain::id::DomainId;
 use crate::domain::time_support::{now_micros, one_microsecond_after, utc_midnight};
-use crate::market_data::audit::{finish_load_run, start_load_run};
+use crate::market_data::audit::{LoadRunContext, finish_load_run, start_load_run_with_context};
+use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
-use crate::market_data::registry::{DataSourceRegistry, TickerLookupMatch, TickerLookupWalk};
+use crate::market_data::registry::{
+    DataSourceRegistry, RegistrySnapshot, TickerLookupMatch, TickerLookupWalk,
+};
 use crate::market_data::types::{
     HistoricalRangeRequest, PriceBar, TickerLookupHit, TypedIdentifier,
 };
@@ -196,6 +199,23 @@ pub struct SourceOutcome {
     pub error: Option<String>,
 }
 
+/// The stored value and dual-temporal provenance of a line that wrote or
+/// confirmed a value.
+///
+/// Implements FR-015 / FR-030 of `specs/022-market-data-load-ui/spec.md`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StoredFactDetail {
+    /// Canonical price-bar payload.
+    pub value: serde_json::Value,
+    /// The date the value applies to.
+    pub as_of_date: NaiveDate,
+    /// The instant the fact was recorded.
+    pub known_at: chrono::DateTime<Utc>,
+    /// The source that answered.
+    pub source_id: String,
+}
+
 /// The per-identifier result line of an execution report.
 ///
 /// Implements FR-006 of spec 018.
@@ -232,6 +252,13 @@ pub struct LoadIdentifierOutcome {
     pub source_id: Option<String>,
     /// Per-source try/typed-error list (the manifest of FR-006).
     pub per_source: Vec<SourceOutcome>,
+    /// The value and provenance written or confirmed by this line.
+    ///
+    /// `Some` only for `loaded` and `no_op`; `None` for every other outcome.
+    /// Serde-defaulted so version-1 payloads written before the field existed
+    /// still deserialize.
+    #[serde(default)]
+    pub stored: Option<StoredFactDetail>,
 }
 
 /// The run's overall status.
@@ -377,6 +404,10 @@ pub struct IdentifierLoadReport {
     pub report_version: u32,
     /// Run audit row's id (`None` only for a dry run).
     pub run_id: Option<Uuid>,
+    /// Data domain loaded by this report.
+    pub data_domain: crate::market_data::data_domain::DataDomain,
+    /// The single date loaded (`None` only for a legacy history row).
+    pub as_of_date: Option<NaiveDate>,
     /// The caller-named preferred source (FR-013); `None` when unnamed —
     /// preserved verbatim even when a different source actually answered.
     pub requested_source: Option<String>,
@@ -452,7 +483,23 @@ pub async fn run_identifier_load(
     registry: &DataSourceRegistry,
     config: IdentifierLoadConfig,
 ) -> Result<IdentifierLoadReport, MarketDataProviderError> {
-    validate_request(&config, registry)?;
+    let snapshot = registry.snapshot();
+    let context = LoadRunContext::market_data(Some(config.as_of_date));
+    run_identifier_load_with_snapshot(pool, &snapshot, config, &context).await
+}
+
+/// Context-aware single-date load used by the range wrapper and the API.
+///
+/// The caller supplies the registry snapshot, so a range can keep one source
+/// set for all of its dates.
+/// Implements FR-026 / FR-028..FR-031 of spec 022.
+pub async fn run_identifier_load_with_snapshot(
+    pool: Option<&sqlx::PgPool>,
+    snapshot: &RegistrySnapshot,
+    config: IdentifierLoadConfig,
+    context: &LoadRunContext,
+) -> Result<IdentifierLoadReport, MarketDataProviderError> {
+    validate_request_with_snapshot(&config, snapshot)?;
 
     let requested_raw = config.identifiers.len();
     let (unique, duplicated) = dedupe_identifiers(config.identifiers.clone());
@@ -460,10 +507,14 @@ pub async fn run_identifier_load(
     let started_at = Utc::now();
 
     if config.dry_run {
-        // A dry run persists nothing at all — no reference-data rows and no
-        // run record — and its report carries an empty run id (FR-008).
-        let report = dry_run_report(&unique, requested_raw, duplicated, &config);
-        return Ok(report);
+        return Ok(dry_run_report(
+            &unique,
+            requested_raw,
+            duplicated,
+            &config,
+            context.data_domain,
+            context.as_of_date.unwrap_or(config.as_of_date),
+        ));
     }
 
     let pool = pool.ok_or_else(|| {
@@ -472,7 +523,13 @@ pub async fn run_identifier_load(
         )
     })?;
 
-    let run_row = start_load_run(pool, &config.trigger, config.preferred_source.as_deref()).await?;
+    let run_row = start_load_run_with_context(
+        pool,
+        &config.trigger,
+        config.preferred_source.as_deref(),
+        context,
+    )
+    .await?;
 
     let mut counters = DataSourceLoadCounters::default();
     let mut per_source_attempted: BTreeMap<String, usize> = BTreeMap::new();
@@ -482,7 +539,7 @@ pub async fn run_identifier_load(
     for identifier in &unique {
         let line = process_identifier(
             pool,
-            registry,
+            snapshot,
             identifier,
             &config,
             &mut counters,
@@ -524,6 +581,8 @@ pub async fn run_identifier_load(
         per_source_failed,
         started_at,
         ended_at,
+        context.data_domain,
+        context.as_of_date.unwrap_or(config.as_of_date),
     ))
 }
 
@@ -539,6 +598,8 @@ fn dry_run_report(
     requested_raw: usize,
     duplicated: usize,
     config: &IdentifierLoadConfig,
+    data_domain: DataDomain,
+    as_of_date: NaiveDate,
 ) -> IdentifierLoadReport {
     let now = Utc::now();
     let lines: Vec<LoadIdentifierOutcome> = unique
@@ -559,12 +620,15 @@ fn dry_run_report(
             outcome: LoadOutcome::NotResolved,
             source_id: None,
             per_source: Vec::new(),
+            stored: None,
         })
         .collect();
 
     IdentifierLoadReport {
         report_version: 1,
         run_id: None,
+        data_domain,
+        as_of_date: Some(as_of_date),
         requested_source: config.preferred_source.clone(),
         status: RunStatus::Complete,
         identifiers_requested_raw: requested_raw,
@@ -596,7 +660,7 @@ fn dry_run_report(
 #[allow(clippy::too_many_arguments)]
 async fn process_identifier(
     pool: &sqlx::PgPool,
-    registry: &DataSourceRegistry,
+    snapshot: &RegistrySnapshot,
     identifier: &TypedIdentifier,
     config: &IdentifierLoadConfig,
     counters: &mut DataSourceLoadCounters,
@@ -628,6 +692,7 @@ async fn process_identifier(
                 None,
                 Vec::new(),
                 AssetCreation::NotRequested,
+                None,
             );
         }
     };
@@ -649,12 +714,13 @@ async fn process_identifier(
                 None,
                 Vec::new(),
                 AssetCreation::NotRequested,
+                None,
             );
         }
         None => {
             let attempt = attempt_asset_creation(
                 pool,
-                registry,
+                snapshot,
                 identifier,
                 config,
                 counters,
@@ -675,7 +741,7 @@ async fn process_identifier(
                     // source; a lookup that failed *is* an attempted line.
                     let attempted = outcome != LoadOutcome::NotResolved;
                     return outcome_line(
-                        identifier, None, attempted, outcome, None, per_source, creation,
+                        identifier, None, attempted, outcome, None, per_source, creation, None,
                     );
                 }
             }
@@ -683,7 +749,7 @@ async fn process_identifier(
     };
 
     let asset_id = AssetId(asset.id);
-    let walk = registry
+    let walk = snapshot
         .walk_historical_range(
             build_range_request(identifier, as_of_date),
             config.preferred_source.as_deref(),
@@ -723,6 +789,7 @@ async fn process_identifier(
             None,
             per_source,
             creation,
+            None,
         );
     };
 
@@ -737,10 +804,11 @@ async fn process_identifier(
             Some(range.source_id.clone()),
             per_source,
             creation,
+            None,
         );
     };
 
-    let stored = store_bar(
+    let (stored_outcome, stored_detail) = store_bar(
         pool,
         asset_id,
         bar,
@@ -750,7 +818,7 @@ async fn process_identifier(
     )
     .await;
 
-    let outcome = match stored {
+    let outcome = match stored_outcome {
         StoreOutcome::Loaded => LoadOutcome::Loaded,
         StoreOutcome::NoOp => LoadOutcome::NoOp,
         StoreOutcome::StorageFailure => LoadOutcome::StorageFailure,
@@ -765,6 +833,7 @@ async fn process_identifier(
         Some(range.source_id.clone()),
         per_source,
         creation,
+        stored_detail,
     )
 }
 
@@ -780,6 +849,7 @@ fn outcome_line(
     source_id: Option<String>,
     per_source: Vec<SourceOutcome>,
     asset_creation: AssetCreation,
+    stored: Option<StoredFactDetail>,
 ) -> LoadIdentifierOutcome {
     LoadIdentifierOutcome {
         identifier: identifier.clone(),
@@ -789,6 +859,7 @@ fn outcome_line(
         outcome,
         source_id,
         per_source,
+        stored,
     }
 }
 
@@ -815,7 +886,7 @@ struct CreationAttempt {
 #[allow(clippy::too_many_arguments)]
 async fn attempt_asset_creation(
     pool: &sqlx::PgPool,
-    registry: &DataSourceRegistry,
+    snapshot: &RegistrySnapshot,
     identifier: &TypedIdentifier,
     config: &IdentifierLoadConfig,
     counters: &mut DataSourceLoadCounters,
@@ -829,7 +900,7 @@ async fn attempt_asset_creation(
         return CreationAttempt::declined(CreationDecline::InvalidSymbol);
     }
 
-    let walk = registry
+    let walk = snapshot
         .walk_ticker_lookup_exact(
             &identifier.value,
             &identifier.scheme,
@@ -1168,9 +1239,17 @@ fn is_identifier_uniqueness_violation(error: &DomainError) -> bool {
 /// Validates the caller's input before anything is contacted.
 ///
 /// Implements FR-002 / FR-013 of spec 018.
+#[cfg(test)]
 fn validate_request(
     config: &IdentifierLoadConfig,
     registry: &DataSourceRegistry,
+) -> Result<(), MarketDataProviderError> {
+    validate_request_with_snapshot(config, &registry.snapshot())
+}
+
+fn validate_request_with_snapshot(
+    config: &IdentifierLoadConfig,
+    snapshot: &RegistrySnapshot,
 ) -> Result<(), MarketDataProviderError> {
     if config.identifiers.is_empty() {
         return Err(MarketDataProviderError::Validation(
@@ -1181,7 +1260,7 @@ fn validate_request(
         validate_identifier_pair(identifier)?;
     }
     validate_as_of_date(config.as_of_date)?;
-    validate_preferred_source(config.preferred_source.as_deref(), registry)?;
+    validate_preferred_source_with_snapshot(config.preferred_source.as_deref(), snapshot)?;
     if config.create_missing_assets && config.default_currency.trim().is_empty() {
         return Err(MarketDataProviderError::Validation(
             "the default asset currency is empty".into(),
@@ -1229,18 +1308,14 @@ pub(crate) fn validate_as_of_date(as_of_date: NaiveDate) -> Result<(), MarketDat
 /// skipped like any other disabled source (FR-010 / FR-013).
 ///
 /// Implements FR-002 / FR-013 of spec 018.
-pub(crate) fn validate_preferred_source(
+pub(crate) fn validate_preferred_source_with_snapshot(
     preferred_source: Option<&str>,
-    registry: &DataSourceRegistry,
+    snapshot: &RegistrySnapshot,
 ) -> Result<(), MarketDataProviderError> {
     let Some(source_id) = preferred_source else {
         return Ok(());
     };
-    let known = registry
-        .enumerate_sources()
-        .iter()
-        .any(|source| source.source_id == source_id);
-    if !known {
+    if !snapshot.is_configured(source_id) {
         return Err(MarketDataProviderError::Validation(format!(
             "preferred source '{source_id}' is not configured"
         )));
@@ -1338,24 +1413,29 @@ async fn store_bar(
     _knowledge_date: NaiveDate,
     source_id: &str,
     as_of_date: NaiveDate,
-) -> StoreOutcome {
+) -> (StoreOutcome, Option<StoredFactDetail>) {
     let value_payload = match serde_json::to_string(&serialize_bar(&bar)) {
         Ok(payload) => payload,
         Err(error) => {
             tracing::warn!(error = %error, "could not encode the bar payload");
-            return StoreOutcome::StorageFailure;
+            return (StoreOutcome::StorageFailure, None);
         }
     };
+    let value = serialize_bar(&bar);
 
-    // Idempotency (research D12 of spec 018, FR-010 of spec 021): the same
-    // payload for the same source is a no-op; a different payload is a
-    // correction and is appended with a fresh transaction time.
     let current = current_belief(pool, asset_id, as_of_date, source_id).await;
-    if current
-        .as_ref()
-        .is_some_and(|(value, _)| value == &value_payload)
+    if let Some((current_value, known_at)) = current.as_ref()
+        && current_value == &value_payload
     {
-        return StoreOutcome::NoOp;
+        return (
+            StoreOutcome::NoOp,
+            Some(StoredFactDetail {
+                value: value.clone(),
+                as_of_date,
+                known_at: *known_at,
+                source_id: source_id.to_string(),
+            }),
+        );
     }
 
     let known_at = match current {
@@ -1377,24 +1457,35 @@ async fn store_bar(
     )
     .await
     {
-        Ok(_) => StoreOutcome::Loaded,
+        Ok(_) => (
+            StoreOutcome::Loaded,
+            Some(StoredFactDetail {
+                value,
+                as_of_date,
+                known_at,
+                source_id: source_id.to_string(),
+            }),
+        ),
         Err(error) => {
             if is_unique_violation(&error) {
                 // A concurrent load wrote the identical fact first: re-read
                 // the current row to tell an idempotent no-op from a real
                 // storage failure (research D12).
-                return if current_belief(pool, asset_id, as_of_date, source_id)
-                    .await
-                    .as_ref()
-                    .is_some_and(|(value, _)| value == &value_payload)
-                {
-                    StoreOutcome::NoOp
-                } else {
-                    StoreOutcome::StorageFailure
+                return match current_belief(pool, asset_id, as_of_date, source_id).await {
+                    Some((value, known_at)) if value == value_payload => (
+                        StoreOutcome::NoOp,
+                        Some(StoredFactDetail {
+                            value: serde_json::from_str(&value).unwrap_or(serde_json::Value::Null),
+                            as_of_date,
+                            known_at,
+                            source_id: source_id.to_string(),
+                        }),
+                    ),
+                    _ => (StoreOutcome::StorageFailure, None),
                 };
             }
             tracing::warn!(asset_id = %asset_id, error = %error, "reference-data write failed");
-            StoreOutcome::StorageFailure
+            (StoreOutcome::StorageFailure, None)
         }
     }
 }
@@ -1460,10 +1551,14 @@ fn build_report(
     per_source_failed: BTreeMap<String, usize>,
     started_at: chrono::DateTime<Utc>,
     ended_at: chrono::DateTime<Utc>,
+    data_domain: DataDomain,
+    as_of_date: NaiveDate,
 ) -> IdentifierLoadReport {
     IdentifierLoadReport {
         report_version: 1,
         run_id,
+        data_domain,
+        as_of_date: Some(as_of_date),
         requested_source,
         status: compute_run_status(counters),
         identifiers_requested_raw,
@@ -2155,6 +2250,8 @@ mod tests {
             BTreeMap::new(),
             now,
             now,
+            DataDomain::MarketData,
+            now.date_naive(),
         );
         assert_eq!(report.loaded, 2);
         assert_eq!(report.no_op, 1);
@@ -2192,6 +2289,8 @@ mod tests {
             failed,
             now,
             now,
+            DataDomain::MarketData,
+            now.date_naive(),
         );
         assert_eq!(report.per_source_attempted.get("yahoo_finance"), Some(&3));
         assert_eq!(report.per_source_failed.get("yahoo_finance"), Some(&1));
@@ -2318,6 +2417,8 @@ mod tests {
             BTreeMap::new(),
             now,
             now,
+            DataDomain::MarketData,
+            now.date_naive(),
         );
         assert_eq!(report.report_version, 1);
         let json = serde_json::to_value(&report).expect("serialize");
@@ -2340,6 +2441,8 @@ mod tests {
             BTreeMap::new(),
             start,
             start,
+            DataDomain::MarketData,
+            start.date_naive(),
         );
         assert_eq!(report.duration_ms, 0);
     }
@@ -2371,6 +2474,7 @@ mod tests {
                     error: None,
                 },
             ],
+            stored: None,
         }];
         let report = build_report(
             &counters,
@@ -2383,6 +2487,8 @@ mod tests {
             BTreeMap::new(),
             now,
             now,
+            DataDomain::MarketData,
+            now.date_naive(),
         );
         assert_eq!(report.requested_source.as_deref(), Some("preferred"));
         assert_eq!(

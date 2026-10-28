@@ -23,12 +23,14 @@ use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::market_data::audit::LoadRunContext;
+use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::load::{
-    IdentifierLoadConfig, IdentifierLoadReport, RunStatus, run_identifier_load,
-    validate_as_of_date, validate_identifier_pair, validate_preferred_source,
+    IdentifierLoadConfig, IdentifierLoadReport, RunStatus, run_identifier_load_with_snapshot,
+    validate_as_of_date, validate_identifier_pair, validate_preferred_source_with_snapshot,
 };
-use crate::market_data::registry::DataSourceRegistry;
+use crate::market_data::registry::{DataSourceRegistry, RegistrySnapshot};
 use crate::market_data::types::TypedIdentifier;
 
 /// The largest accepted concurrency window.
@@ -121,6 +123,10 @@ pub struct RangeLoadTotals {
 pub struct IdentifierRangeLoadReport {
     /// The report schema version (FR-007). Currently `1`.
     pub report_version: u32,
+    /// Data domain loaded by this range.
+    pub data_domain: DataDomain,
+    /// Client-generated (or server-generated) group id shared by every child.
+    pub range_group_id: Uuid,
     /// First requested date.
     pub from: NaiveDate,
     /// Last requested date.
@@ -168,19 +174,73 @@ pub async fn run_identifier_range_load(
     registry: &DataSourceRegistry,
     config: IdentifierRangeLoadConfig,
 ) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
-    validate_range_request(&config, registry)?;
+    let snapshot = registry.snapshot();
+    run_identifier_range_load_with_snapshot(
+        pool,
+        &snapshot,
+        config,
+        Uuid::new_v4(),
+        DataDomain::MarketData,
+    )
+    .await
+}
+
+/// Range load with a caller-supplied group id (the browser generates one so
+/// it can poll progress before the response arrives).
+/// Implements FR-026 / FR-028..FR-031 of spec 022.
+pub async fn run_identifier_range_load_with_group(
+    pool: Option<&sqlx::PgPool>,
+    registry: &DataSourceRegistry,
+    config: IdentifierRangeLoadConfig,
+    group_id: Uuid,
+    data_domain: DataDomain,
+) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
+    let snapshot = registry.snapshot();
+    run_identifier_range_load_with_snapshot(pool, &snapshot, config, group_id, data_domain).await
+}
+
+/// Range load over an already-taken snapshot.
+///
+/// One snapshot is passed to every date, so enabling/disabling a source while
+/// the range is in flight does not change the run's source set.
+/// Implements FR-026 / FR-028..FR-031 of spec 022.
+pub async fn run_identifier_range_load_with_snapshot(
+    pool: Option<&sqlx::PgPool>,
+    snapshot: &RegistrySnapshot,
+    config: IdentifierRangeLoadConfig,
+    group_id: Uuid,
+    data_domain: DataDomain,
+) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
+    validate_range_request_with_snapshot(&config, snapshot)?;
 
     let dates = enumerate_dates(config.from, config.to);
     let started_at = Utc::now();
+    let range_from = config.from;
+    let range_to = config.to;
+    let concurrency = config.concurrency;
 
     let mut results: Vec<(
         NaiveDate,
         Result<IdentifierLoadReport, MarketDataProviderError>,
     )> = stream::iter(dates.into_iter().map(|date| {
         let per_date = config_for_date(&config, date);
-        async move { (date, run_identifier_load(pool, registry, per_date).await) }
+        let per_date_context = LoadRunContext::range(
+            data_domain,
+            date,
+            group_id,
+            range_from,
+            range_to,
+            concurrency as i32,
+        );
+        async move {
+            (
+                date,
+                run_identifier_load_with_snapshot(pool, snapshot, per_date, &per_date_context)
+                    .await,
+            )
+        }
     }))
-    .buffer_unordered(config.concurrency)
+    .buffer_unordered(concurrency)
     .collect()
     .await;
 
@@ -213,15 +273,25 @@ pub async fn run_identifier_range_load(
         sections,
         started_at,
         ended_at,
+        data_domain,
+        group_id,
     ))
 }
 
 /// Validates the range request before any date is attempted.
 ///
 /// Implements FR-002 / FR-014 of spec 018.
+#[cfg(test)]
 fn validate_range_request(
     config: &IdentifierRangeLoadConfig,
     registry: &DataSourceRegistry,
+) -> Result<(), MarketDataProviderError> {
+    validate_range_request_with_snapshot(config, &registry.snapshot())
+}
+
+fn validate_range_request_with_snapshot(
+    config: &IdentifierRangeLoadConfig,
+    snapshot: &RegistrySnapshot,
 ) -> Result<(), MarketDataProviderError> {
     if config.identifiers.is_empty() {
         return Err(MarketDataProviderError::Validation(
@@ -245,7 +315,7 @@ fn validate_range_request(
             config.concurrency
         )));
     }
-    validate_preferred_source(config.preferred_source.as_deref(), registry)?;
+    validate_preferred_source_with_snapshot(config.preferred_source.as_deref(), snapshot)?;
     if config.create_missing_assets && config.default_currency.trim().is_empty() {
         return Err(MarketDataProviderError::Validation(
             "the default asset currency is empty".into(),
@@ -292,6 +362,7 @@ fn config_for_date(config: &IdentifierRangeLoadConfig, date: NaiveDate) -> Ident
 /// Assembles the range report and its rollups.
 ///
 /// Implements FR-014 of spec 018.
+#[allow(clippy::too_many_arguments)]
 fn build_range_report(
     from: NaiveDate,
     to: NaiveDate,
@@ -299,6 +370,8 @@ fn build_range_report(
     sections: Vec<DateLoadSection>,
     started_at: chrono::DateTime<Utc>,
     ended_at: chrono::DateTime<Utc>,
+    data_domain: DataDomain,
+    range_group_id: Uuid,
 ) -> IdentifierRangeLoadReport {
     let mut totals = RangeLoadTotals::default();
     let mut dates_with_loads = 0usize;
@@ -335,6 +408,8 @@ fn build_range_report(
 
     IdentifierRangeLoadReport {
         report_version: 1,
+        data_domain,
+        range_group_id,
         from,
         to,
         concurrency,

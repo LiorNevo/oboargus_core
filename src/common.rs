@@ -54,6 +54,7 @@ const TABLES: &[&str] = &[
     // dependency order explicit makes the list readable).
     "data_source_reconciliation_audits",
     "data_source_refresh_runs",
+    "data_source_state_changes",
     "reference_data_load_runs",
     "data_sources",
     "assets",

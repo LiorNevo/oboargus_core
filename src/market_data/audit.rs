@@ -5,6 +5,8 @@
 //! `data_source_reconciliation_audits` (defined in
 //! `obolargus_core/migrations/0005_market_data_sources.sql`).
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -12,6 +14,7 @@ use uuid::Uuid;
 
 use crate::domain::id::DomainId;
 use crate::domain::id::{AssetId, DataSourceRefreshRunId, ReconciliationAuditId};
+use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
 
 /// One row in `data_source_refresh_runs`.
@@ -273,7 +276,103 @@ pub struct LoadRunRow {
     pub per_identifier: serde_json::Value,
     /// Wall-clock duration, in milliseconds (`None` while in flight).
     pub duration_ms: Option<i64>,
+    /// Data domain loaded by this run.
+    pub data_domain: String,
+    /// The date this run loaded (`None` for legacy rows).
+    pub as_of_date: Option<NaiveDate>,
+    /// Range group id (`None` for a single-date run).
+    pub range_group_id: Option<Uuid>,
+    /// First date of the range (`None` for a single-date run).
+    pub range_from: Option<NaiveDate>,
+    /// Last date of the range (`None` for a single-date run).
+    pub range_to: Option<NaiveDate>,
+    /// Window size used by the range (`None` for a single-date run).
+    pub range_concurrency: Option<i32>,
+    /// Distinct sources that answered, for list rendering.
+    pub answering_sources: Vec<String>,
 }
+
+/// Metadata written when a load run starts.
+#[derive(Debug, Clone, Copy)]
+/// Implements FR-026 / FR-028..FR-031 of spec 022.
+pub struct LoadRunContext {
+    /// Data domain loaded by the run.
+    pub data_domain: DataDomain,
+    /// The single date loaded, when known at start time.
+    pub as_of_date: Option<NaiveDate>,
+    /// Range group id for a per-date range child.
+    pub range_group_id: Option<Uuid>,
+    /// First date of the range.
+    pub range_from: Option<NaiveDate>,
+    /// Last date of the range.
+    pub range_to: Option<NaiveDate>,
+    /// Window size used by the range.
+    pub range_concurrency: Option<i32>,
+}
+
+impl LoadRunContext {
+    /// A plain market-data single-date context.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
+    pub fn market_data(as_of_date: Option<NaiveDate>) -> Self {
+        Self {
+            data_domain: DataDomain::MarketData,
+            as_of_date,
+            range_group_id: None,
+            range_from: None,
+            range_to: None,
+            range_concurrency: None,
+        }
+    }
+
+    /// A market-data range child context.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
+    pub fn market_data_range(
+        as_of_date: NaiveDate,
+        group_id: Uuid,
+        from: NaiveDate,
+        to: NaiveDate,
+        concurrency: i32,
+    ) -> Self {
+        Self::range(
+            DataDomain::MarketData,
+            as_of_date,
+            group_id,
+            from,
+            to,
+            concurrency,
+        )
+    }
+
+    /// A range child context for any domain.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
+    pub fn range(
+        data_domain: DataDomain,
+        as_of_date: NaiveDate,
+        group_id: Uuid,
+        from: NaiveDate,
+        to: NaiveDate,
+        concurrency: i32,
+    ) -> Self {
+        Self {
+            data_domain,
+            as_of_date: Some(as_of_date),
+            range_group_id: Some(group_id),
+            range_from: Some(from),
+            range_to: Some(to),
+            range_concurrency: Some(concurrency),
+        }
+    }
+}
+
+/// The shared SELECT for a load-run row, including the 0010 columns.
+const LOAD_RUN_SELECT: &str = "SELECT id, started_at, ended_at, trigger, requested_source, \
+     identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, \
+     loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, \
+     rejected, source_unavailable, rate_limited, storage_failure, \
+     assets_created, assets_adopted, per_source_attempted, per_source_failed, \
+     per_identifier, duration_ms, data_domain, as_of_date, range_group_id, \
+     range_from, range_to, range_concurrency, answering_sources \
+     FROM reference_data_load_runs WHERE id = $1";
 
 /// Opens a new load-run audit row.
 ///
@@ -286,27 +385,62 @@ pub async fn start_load_run(
     trigger: &str,
     preferred_source: Option<&str>,
 ) -> Result<LoadRunRow, MarketDataProviderError> {
+    start_load_run_with_context(
+        pool,
+        trigger,
+        preferred_source,
+        &LoadRunContext::market_data(None),
+    )
+    .await
+}
+
+/// Opens a new load-run audit row with domain and range metadata.
+///
+/// Implements FR-008 of spec 018 and FR-026/FR-028 of spec 022.
+pub async fn start_load_run_with_context(
+    pool: &sqlx::PgPool,
+    trigger: &str,
+    preferred_source: Option<&str>,
+    context: &LoadRunContext,
+) -> Result<LoadRunRow, MarketDataProviderError> {
     let id = Uuid::new_v4();
     let trigger_label = if trigger.is_empty() { "test" } else { trigger };
     sqlx::query(
-        "INSERT INTO reference_data_load_runs (id, started_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, per_source_attempted, per_source_failed, per_identifier) \
-         VALUES ($1, NOW(), $2, $3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb)",
+        "INSERT INTO reference_data_load_runs (
+            id, started_at, trigger, requested_source,
+            identifiers_requested_raw, identifiers_duplicated, identifiers_attempted,
+            loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme,
+            rejected, source_unavailable, rate_limited, storage_failure,
+            per_source_attempted, per_source_failed, per_identifier,
+            data_domain, as_of_date, range_group_id, range_from, range_to,
+            range_concurrency, answering_sources
+         ) VALUES (
+            $1, NOW(), $2, $3,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
+            $4, $5, $6, $7, $8, $9, '{}'::text[]
+         )",
     )
     .bind(id)
     .bind(trigger_label)
     .bind(preferred_source)
+    .bind(context.data_domain.as_str())
+    .bind(context.as_of_date)
+    .bind(context.range_group_id)
+    .bind(context.range_from)
+    .bind(context.range_to)
+    .bind(context.range_concurrency)
     .execute(pool)
     .await
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("start_load_run: {e}")))?;
 
-    let row: LoadRunRow = sqlx::query_as(
-        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, assets_created, assets_adopted, per_source_attempted, per_source_failed, per_identifier, duration_ms \
-         FROM reference_data_load_runs WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| MarketDataProviderError::Infrastructure(format!("start_load_run read: {e}")))?;
+    let row: LoadRunRow = sqlx::query_as(LOAD_RUN_SELECT)
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| {
+            MarketDataProviderError::Infrastructure(format!("start_load_run read: {e}"))
+        })?;
     Ok(row)
 }
 
@@ -328,6 +462,19 @@ pub async fn finish_load_run(
     per_source_failed: &serde_json::Value,
     per_identifier: &serde_json::Value,
 ) -> Result<LoadRunRow, MarketDataProviderError> {
+    let answering_sources: Vec<String> = per_identifier
+        .as_array()
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| line.get("source_id").and_then(|value| value.as_str()))
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default();
+
     sqlx::query(
         "UPDATE reference_data_load_runs \
          SET ended_at = NOW(), \
@@ -348,6 +495,7 @@ pub async fn finish_load_run(
              per_source_attempted = $16, \
              per_source_failed = $17, \
              per_identifier = $18, \
+             answering_sources = $19, \
              duration_ms = (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint \
          WHERE id = $1",
     )
@@ -369,18 +517,18 @@ pub async fn finish_load_run(
     .bind(per_source_attempted)
     .bind(per_source_failed)
     .bind(per_identifier)
+    .bind(&answering_sources)
     .execute(pool)
     .await
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("finish_load_run: {e}")))?;
 
-    let row: LoadRunRow = sqlx::query_as(
-        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, assets_created, assets_adopted, per_source_attempted, per_source_failed, per_identifier, duration_ms \
-         FROM reference_data_load_runs WHERE id = $1",
-    )
-    .bind(run_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| MarketDataProviderError::Infrastructure(format!("finish_load_run read: {e}")))?;
+    let row: LoadRunRow = sqlx::query_as(LOAD_RUN_SELECT)
+        .bind(run_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| {
+            MarketDataProviderError::Infrastructure(format!("finish_load_run read: {e}"))
+        })?;
     Ok(row)
 }
 
@@ -391,14 +539,11 @@ pub async fn get_load_run(
     pool: &sqlx::PgPool,
     run_id: Uuid,
 ) -> Result<LoadRunRow, MarketDataProviderError> {
-    let row: Option<LoadRunRow> = sqlx::query_as(
-        "SELECT id, started_at, ended_at, trigger, requested_source, identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, rejected, source_unavailable, rate_limited, storage_failure, assets_created, assets_adopted, per_source_attempted, per_source_failed, per_identifier, duration_ms \
-         FROM reference_data_load_runs WHERE id = $1",
-    )
-    .bind(run_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| MarketDataProviderError::Infrastructure(format!("get_load_run: {e}")))?;
+    let row: Option<LoadRunRow> = sqlx::query_as(LOAD_RUN_SELECT)
+        .bind(run_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| MarketDataProviderError::Infrastructure(format!("get_load_run: {e}")))?;
 
     match row {
         Some(row) => Ok(row),

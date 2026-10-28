@@ -17,13 +17,16 @@
 
 pub mod audit;
 pub mod config;
+pub mod data_domain;
 pub mod data_sources;
 pub mod error;
+pub mod history;
 pub mod load;
 pub mod load_range;
 pub mod reconcile;
 pub mod refresh;
 pub mod registry;
+pub mod source_state;
 pub mod trait_;
 pub mod types;
 
@@ -32,11 +35,13 @@ pub use audit::{
     record_reconciliation_audit, start_refresh_run,
 };
 pub use config::{DataSourceConfig, MarketDataConfig};
+pub use data_domain::DataDomain;
 pub use data_sources::{DataSourceRow, list_data_sources, upsert_data_source};
 pub use error::MarketDataProviderError;
 pub use load::{
     AssetCreation, CreationDecline, CurrencySource, DEFAULT_ASSET_CURRENCY, IdentifierLoadConfig,
-    IdentifierLoadReport, LoadIdentifierOutcome, LoadOutcome, RunStatus, run_identifier_load,
+    IdentifierLoadReport, LoadIdentifierOutcome, LoadOutcome, RunStatus, StoredFactDetail,
+    run_identifier_load,
 };
 pub use load_range::{
     DateLoadSection, IdentifierRangeLoadConfig, IdentifierRangeLoadReport, MAX_CONCURRENCY,
@@ -44,7 +49,8 @@ pub use load_range::{
 };
 pub use reconcile::{ReconcileConfig, ReconcileSummary, ReconciliationPolicy, run_reconcile};
 pub use refresh::{RefreshConfig, RefreshSummary, run_refresh};
-pub use registry::{DataSourceRegistry, SourceDescriptor};
+pub use registry::{DataSourceRegistry, RegistrySnapshot, SourceCatalogEntry, SourceDescriptor};
+pub use source_state::{SourceStateChange, SourceStateChangeResult, set_source_enabled};
 pub use trait_::MarketDataProvider;
 pub use types::{
     HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, PriceBar,

@@ -46,6 +46,14 @@ pub trait MarketDataProvider: Send + Sync {
     /// `["TICKER:*"]` (venue-qualified wildcards).
     fn supported_schemes(&self) -> &[String];
 
+    /// The data domains this provider can serve.
+    ///
+    /// Defaults to market data so existing providers and test mocks keep
+    /// compiling; a provider serving other domains overrides it.
+    fn supported_data_domains(&self) -> Vec<String> {
+        vec!["market_data".to_string()]
+    }
+
     /// Whether the provider is enabled for the current deployment.
     /// Registry skips disabled providers (FR-004).
     fn enabled(&self) -> bool;

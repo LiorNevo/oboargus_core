@@ -136,6 +136,9 @@ pub struct DataSourceConfig {
     /// unqualified.
     #[serde(default)]
     pub supported_schemes: Vec<String>,
+    /// Data domains this source can serve (FR-027 of spec 022).
+    #[serde(default = "default_data_domains")]
+    pub supported_data_domains: Vec<String>,
     /// Optional per-source rate-limit (requests per minute). `None` ⇒
     /// upstream default (10 req/s with the `governor` feature).
     #[serde(default)]
@@ -163,6 +166,11 @@ fn default_true() -> bool {
 /// Serde default for `priority` (10).
 fn default_priority() -> i32 {
     10
+}
+
+/// Serde default for `supported_data_domains` (market data only).
+fn default_data_domains() -> Vec<String> {
+    vec!["market_data".to_string()]
 }
 
 /// Per-source retry configuration.
@@ -212,6 +220,7 @@ impl DataSourceConfig {
                 "ISIN".into(),
                 "CUSIP".into(),
             ],
+            supported_data_domains: vec!["market_data".into()],
             rate_limit_per_minute: Some(60),
             api_key_env_var: None,
             user_agent: Some("obolargus/0.1.0 (+https://obolargus.example)".into()),
@@ -242,6 +251,21 @@ impl DataSourceConfig {
             return Err(MarketDataProviderError::Validation(format!(
                 "timeout_seconds must be in 1..=600 (got {t})"
             )));
+        }
+        if self.supported_data_domains.is_empty() {
+            return Err(MarketDataProviderError::Validation(
+                "supported_data_domains must not be empty".into(),
+            ));
+        }
+        for domain in &self.supported_data_domains {
+            if domain
+                .parse::<crate::market_data::data_domain::DataDomain>()
+                .is_err()
+            {
+                return Err(MarketDataProviderError::Validation(format!(
+                    "unknown supported_data_domain '{domain}'"
+                )));
+            }
         }
         Ok(())
     }

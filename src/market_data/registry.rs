@@ -6,11 +6,12 @@
 //! in `(priority ASC, source_id ASC)` order, applying the failover policy
 //! (Transient / RateLimited fall over; the rest are final).
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use serde::Serialize;
 
+use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::trait_::MarketDataProvider;
 use crate::market_data::types::{
@@ -34,6 +35,34 @@ pub struct SourceDescriptor {
     pub priority: i32,
     /// Identifier schemes this source can answer.
     pub supported_schemes: Vec<String>,
+    /// Data domains this source can serve.
+    pub supported_data_domains: Vec<String>,
+}
+
+/// Rich catalog entry for the Data Load page.
+///
+/// Adds the domain-specific selectability and the operator-facing reason a
+/// source cannot be chosen. The runtime enabled flag is authoritative.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+/// Implements FR-026 / FR-028..FR-031 of spec 022.
+pub struct SourceCatalogEntry {
+    /// Stable id.
+    pub source_id: String,
+    /// Human-readable name.
+    pub display_name: String,
+    /// Runtime enabled state (not the deployment configuration).
+    pub enabled: bool,
+    /// Numeric priority (lower = tried first).
+    pub priority: i32,
+    /// Identifier schemes this source can answer.
+    pub supported_schemes: Vec<String>,
+    /// Data domains this source can serve.
+    pub supported_data_domains: Vec<String>,
+    /// Whether the source can be chosen for the requested domain.
+    pub selectable_for_domain: bool,
+    /// Why the source is not selectable, when it is not.
+    pub unavailable_reason: Option<String>,
 }
 
 /// One source's failure during a registry walk.
@@ -116,29 +145,53 @@ pub struct RangeWalkOutcome {
 /// Source-agnostic façade. Constructed at startup with one trait object per
 /// configured source. Consumers call the registry, not individual providers.
 ///
-/// Implements US3 of spec 017.
+/// Implements US3 of spec 017 and the runtime source control of spec 022.
 pub struct DataSourceRegistry {
-    /// Enabled providers only, sorted by `(priority ASC, source_id ASC)`.
-    /// Disabled providers are filtered out at construction time.
-    enabled: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
-    /// All providers (enabled or disabled), for enumeration. Sorted by
-    /// `source_id ASC`.
+    /// Every configured provider, sorted by `source_id ASC`.
     all: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+    /// Runtime enabled state. The database is the authority when persisted;
+    /// this lock holds the in-process projection.
+    state: RwLock<RegistryState>,
+}
+
+/// The mutable runtime projection of source enablement.
+struct RegistryState {
+    /// Enabled providers in `(priority ASC, source_id ASC)` order.
+    enabled: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+    /// Enabled source ids, for membership checks.
+    enabled_ids: BTreeSet<String>,
+}
+
+/// An immutable view of the enabled providers for one request.
+///
+/// A load takes one snapshot at entry; enabling/disabling a source after that
+/// cannot change the run already in flight.
+#[derive(Clone)]
+/// Implements FR-026 / FR-028..FR-031 of spec 022.
+pub struct RegistrySnapshot {
+    providers: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+    configured_ids: BTreeSet<String>,
+}
+
+impl RegistrySnapshot {
+    /// Whether the id belongs to any configured source (enabled or not).
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
+    pub fn is_configured(&self, source_id: &str) -> bool {
+        self.configured_ids.contains(source_id)
+    }
 }
 
 impl DataSourceRegistry {
     /// Construct from a vec of providers. Validates unique `source_id`
     /// (FR-003); fails fast on duplicates with a typed error.
     ///
-    /// Disabled providers are filtered out of the walking list but kept
-    /// for `enumerate_sources` (FR-002). If the enabled list is empty
-    /// AND at least one provider was supplied, returns
-    /// `Validation` (per the FR-005 reconciliation Edge Cases entry).
+    /// Every provider is kept for enumeration and future enablement. The
+    /// initial enabled set comes from each provider's `enabled()` (the
+    /// deployment default); a database-backed builder overrides it.
     pub fn new(
         providers: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
     ) -> Result<Self, MarketDataProviderError> {
-        // Duplicate detection
-        let mut ids_seen = std::collections::BTreeSet::new();
+        let mut ids_seen = BTreeSet::new();
         for p in &providers {
             if !ids_seen.insert(p.source_id().to_string()) {
                 return Err(MarketDataProviderError::Validation(format!(
@@ -147,34 +200,133 @@ impl DataSourceRegistry {
                 )));
             }
         }
-        // All providers (sorted by id ASC for enumeration)
         let mut all = providers;
         all.sort_by(|a, b| a.source_id().cmp(b.source_id()));
 
-        // Enabled providers (sorted by (priority ASC, source_id ASC) for
-        // walking; ties broken alphabetically)
         let mut enabled: Vec<Arc<dyn MarketDataProvider + Send + Sync>> =
             all.iter().filter(|p| p.enabled()).cloned().collect();
-        enabled.sort_by(|a, b| {
-            a.priority()
-                .cmp(&b.priority())
-                .then_with(|| a.source_id().cmp(b.source_id()))
-        });
+        sort_by_priority(&mut enabled);
+        let enabled_ids = enabled
+            .iter()
+            .map(|p| p.source_id().to_string())
+            .collect::<BTreeSet<_>>();
 
-        Ok(Self { enabled, all })
+        Ok(Self {
+            all,
+            state: RwLock::new(RegistryState {
+                enabled,
+                enabled_ids,
+            }),
+        })
+    }
+
+    fn read_state(&self) -> RwLockReadGuard<'_, RegistryState> {
+        self.state
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn write_state(&self) -> RwLockWriteGuard<'_, RegistryState> {
+        self.state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Take an immutable snapshot of the enabled providers.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
+    pub fn snapshot(&self) -> RegistrySnapshot {
+        RegistrySnapshot {
+            providers: self.read_state().enabled.clone(),
+            configured_ids: self.all.iter().map(|p| p.source_id().to_string()).collect(),
+        }
+    }
+
+    /// Enable or disable an already-configured source at runtime.
+    ///
+    /// This only updates the in-process projection; the caller persists the
+    /// change first. An unknown id is a typed validation error.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
+    pub fn set_enabled(
+        &self,
+        source_id: &str,
+        enabled: bool,
+    ) -> Result<(), MarketDataProviderError> {
+        let provider = self
+            .all
+            .iter()
+            .find(|p| p.source_id() == source_id)
+            .cloned()
+            .ok_or_else(|| {
+                MarketDataProviderError::Validation(format!("unknown source '{source_id}'"))
+            })?;
+
+        let mut state = self.write_state();
+        if enabled {
+            if state.enabled_ids.insert(source_id.to_string()) {
+                state.enabled.push(provider);
+                sort_by_priority(&mut state.enabled);
+            }
+        } else if state.enabled_ids.remove(source_id) {
+            state.enabled.retain(|p| p.source_id() != source_id);
+        }
+        Ok(())
+    }
+
+    /// List every configured source with runtime state and domain metadata.
+    ///
+    /// `domain` controls `selectable_for_domain`; when absent, the field
+    /// equals `enabled`.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
+    pub fn catalog(&self, domain: Option<DataDomain>) -> Vec<SourceCatalogEntry> {
+        let state = self.read_state();
+        let mut entries: Vec<SourceCatalogEntry> = self
+            .all
+            .iter()
+            .map(|p| {
+                let is_enabled = state.enabled_ids.contains(p.source_id());
+                let domains = p.supported_data_domains();
+                let selectable = is_enabled
+                    && domain.is_none_or(|d| domains.iter().any(|value| value == d.as_str()));
+                let unavailable_reason = if !is_enabled {
+                    Some("Source is disabled".to_string())
+                } else if !selectable {
+                    Some("Source cannot serve this domain".to_string())
+                } else {
+                    None
+                };
+                SourceCatalogEntry {
+                    source_id: p.source_id().to_string(),
+                    display_name: p.display_name().to_string(),
+                    enabled: is_enabled,
+                    priority: p.priority(),
+                    supported_schemes: p.supported_schemes().to_vec(),
+                    supported_data_domains: domains,
+                    selectable_for_domain: selectable,
+                    unavailable_reason,
+                }
+            })
+            .collect();
+        entries.sort_by(|a, b| {
+            a.priority
+                .cmp(&b.priority)
+                .then_with(|| a.source_id.cmp(&b.source_id))
+        });
+        entries
     }
 
     /// List every configured source, enabled or not, in `source_id ASC`
     /// order (FR-002). Disabled sources appear with `enabled: false`.
     pub fn enumerate_sources(&self) -> Vec<SourceDescriptor> {
+        let state = self.read_state();
         self.all
             .iter()
             .map(|p| SourceDescriptor {
                 source_id: p.source_id().to_string(),
                 display_name: p.display_name().to_string(),
-                enabled: p.enabled(),
+                enabled: state.enabled_ids.contains(p.source_id()),
                 priority: p.priority(),
                 supported_schemes: p.supported_schemes().to_vec(),
+                supported_data_domains: p.supported_data_domains(),
             })
             .collect()
     }
@@ -183,7 +335,7 @@ impl DataSourceRegistry {
     ///
     /// Implements FR-002 of spec 017 (reconciliation requires >= 2).
     pub fn enabled_count(&self) -> usize {
-        self.enabled.len()
+        self.read_state().enabled.len()
     }
 
     /// "First success" walk. Walks enabled providers in
@@ -191,12 +343,84 @@ impl DataSourceRegistry {
     /// `supported_schemes` contains the request's scheme; on
     /// `Transient` / `RateLimited` falls over; on `NotFound` /
     /// `InvalidInput` / `Unsupported` / `Unauthorized` /
-    /// `Infrastructure` returns immediately. If no enabled source
-    /// matches the request's scheme, returns `Err(NotFound)`. If every
-    /// enabled source returns a retryable error, surfaces the LAST
-    /// encountered retryable error (preserved upstream message).
+    /// `Infrastructure` returns immediately.
     ///
     /// Implements FR-005 of spec 017.
+    pub async fn get_latest_bar(
+        &self,
+        request: LatestBarRequest,
+    ) -> Result<LatestBar, MarketDataProviderError> {
+        self.snapshot().get_latest_bar(request).await
+    }
+
+    /// The "first success" walk, plus the per-source failures it encountered.
+    ///
+    /// Implements FR-005 / FR-007 / FR-032 of spec 017.
+    pub async fn walk_latest_bar(&self, request: LatestBarRequest) -> WalkOutcome {
+        self.snapshot().walk_latest_bar(request).await
+    }
+
+    /// Same walking policy as `get_latest_bar`, for `get_historical_range`.
+    ///
+    /// Implements FR-005 of spec 017.
+    pub async fn get_historical_range(
+        &self,
+        request: HistoricalRangeRequest,
+    ) -> Result<HistoricalRange, MarketDataProviderError> {
+        self.snapshot().get_historical_range(request).await
+    }
+
+    /// The ranged "first success" walk, plus the per-source failures.
+    ///
+    /// Implements FR-009 of spec 018.
+    pub async fn walk_historical_range(
+        &self,
+        request: HistoricalRangeRequest,
+        preferred_source: Option<&str>,
+    ) -> RangeWalkOutcome {
+        self.snapshot()
+            .walk_historical_range(request, preferred_source)
+            .await
+    }
+
+    /// The ticker-lookup walk used by asset creation.
+    ///
+    /// Implements FR-014 of spec 018.
+    pub async fn walk_ticker_lookup_exact(
+        &self,
+        query: &str,
+        scheme: &str,
+        preferred_source: Option<&str>,
+    ) -> TickerLookupWalk {
+        self.snapshot()
+            .walk_ticker_lookup_exact(query, scheme, preferred_source)
+            .await
+    }
+
+    /// "Every enabled source's answer" for latest bars.
+    ///
+    /// Implements FR-006 of spec 017.
+    pub async fn every_source_latest_bar(
+        &self,
+        request: LatestBarRequest,
+    ) -> BTreeMap<String, Result<LatestBar, MarketDataProviderError>> {
+        self.snapshot().every_source_latest_bar(request).await
+    }
+
+    /// "Every enabled source's answer" for ticker lookup.
+    ///
+    /// Implements FR-006 / FR-012 of spec 017.
+    pub async fn every_source_lookup_ticker(
+        &self,
+        request: TickerLookupRequest,
+    ) -> BTreeMap<String, Result<TickerLookupResult, MarketDataProviderError>> {
+        self.snapshot().every_source_lookup_ticker(request).await
+    }
+}
+
+impl RegistrySnapshot {
+    /// "First success" walk over this snapshot.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
     pub async fn get_latest_bar(
         &self,
         request: LatestBarRequest,
@@ -211,15 +435,8 @@ impl DataSourceRegistry {
         }
     }
 
-    /// The "first success" walk, plus the per-source failures it
-    /// encountered along the way.
-    ///
-    /// The outcome always carries the failure list — including when the
-    /// walk produced no answer — so the refresh orchestrator can record
-    /// the failing source ids in `per_source_failed` (FR-032). The audit
-    /// names the *source* that failed, not an opaque marker.
-    ///
-    /// Implements FR-005 / FR-007 / FR-032 of spec 017.
+    /// The "first success" walk over this snapshot, with failures.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
     pub async fn walk_latest_bar(&self, request: LatestBarRequest) -> WalkOutcome {
         let candidates = self.candidates_for(&request.identifier.scheme);
         if candidates.is_empty() {
@@ -285,8 +502,7 @@ impl DataSourceRegistry {
     }
 
     /// Same walking policy as `get_latest_bar`, for `get_historical_range`.
-    ///
-    /// Implements FR-005 of spec 017.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
     pub async fn get_historical_range(
         &self,
         request: HistoricalRangeRequest,
@@ -315,24 +531,8 @@ impl DataSourceRegistry {
         }))
     }
 
-    /// The ranged "first success" walk, plus the per-source failures it
-    /// encountered along the way.
-    ///
-    /// Mirrors [`DataSourceRegistry::walk_latest_bar`] for ranged requests:
-    /// the same scheme filter and the same fail-over rule, plus the
-    /// per-source failure manifest the load's report needs (FR-006).
-    ///
-    /// When `preferred_source` names a configured source, that source is
-    /// consulted **first** — a preference, not a restriction: the fail-over
-    /// continues over the remaining enabled sources when it cannot answer
-    /// (FR-013 of spec 018). An id that is not configured never reaches the
-    /// walk; the caller rejects it as caller-input validation.
-    ///
-    /// The empty candidate set is signalled by exactly one contract:
-    /// `range: None`, `error: Some(NotFound("no enabled source supports
-    /// scheme '<scheme>'"))`, `failures: vec![]`.
-    ///
-    /// Implements FR-009 of spec 018.
+    /// The ranged "first success" walk over this snapshot.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
     pub async fn walk_historical_range(
         &self,
         request: HistoricalRangeRequest,
@@ -405,21 +605,8 @@ impl DataSourceRegistry {
         }
     }
 
-    /// The ticker-lookup walk used by asset creation.
-    ///
-    /// Consulted sources are the scheme's candidates in the usual priority
-    /// order, with `preferred_source` moved to the front (FR-013 of spec
-    /// 018). Only **exact symbol matches** are returned: a hit whose
-    /// `symbol` does not equal `query` (case-insensitively) is ignored, so
-    /// a fuzzy upstream match can never be mistaken for the requested
-    /// instrument.
-    ///
-    /// The walk stops at the first source that produced at least one exact
-    /// match. When no source produced a match, `matches` is empty and
-    /// `error` names the last retryable failure, or a `NotFound` when every
-    /// consulted source answered but none recognized the symbol.
-    ///
-    /// Implements FR-014 of spec 018.
+    /// The ticker-lookup walk over this snapshot.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
     pub async fn walk_ticker_lookup_exact(
         &self,
         query: &str,
@@ -497,49 +684,52 @@ impl DataSourceRegistry {
         }
     }
 
-    /// "Every enabled source's answer" — never fails because of a single
-    /// source's failure. Returns a map keyed by `source_id` whose values
-    /// are `Result<…, MarketDataProviderError>`. Sequential in v1
-    /// (research D-out-of-scope; parallel batch is a follow-on).
-    ///
-    /// Implements FR-006 of spec 017.
+    /// "Every enabled source's answer" for latest bars.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
     pub async fn every_source_latest_bar(
         &self,
         request: LatestBarRequest,
     ) -> BTreeMap<String, Result<LatestBar, MarketDataProviderError>> {
         let mut out = BTreeMap::new();
-        for provider in &self.enabled {
+        for provider in &self.providers {
             let outcome = provider.get_latest_bar(request.clone()).await;
             out.insert(provider.source_id().to_string(), outcome);
         }
         out
     }
 
-    /// "Every enabled source's answer" for ticker lookup. Mirrors
-    /// `every_source_latest_bar`.
-    ///
-    /// Implements FR-006 / FR-012 of spec 017.
+    /// "Every enabled source's answer" for ticker lookup.
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
     pub async fn every_source_lookup_ticker(
         &self,
         request: TickerLookupRequest,
     ) -> BTreeMap<String, Result<TickerLookupResult, MarketDataProviderError>> {
         let mut out = BTreeMap::new();
-        for provider in &self.enabled {
+        for provider in &self.providers {
             let outcome = provider.lookup_ticker(request.clone()).await;
             out.insert(provider.source_id().to_string(), outcome);
         }
         out
     }
 
-    /// Filters the enabled list to providers whose `supported_schemes`
-    /// contains `scheme` (with `TICKER:*` matching any `TICKER:XXX`).
-    fn candidates_for(&self, scheme: &str) -> Vec<Arc<dyn MarketDataProvider + Send + Sync>> {
-        self.enabled
+    /// Filters the snapshot to providers whose `supported_schemes` contains
+    /// `scheme` (with `TICKER:*` matching any `TICKER:XXX`).
+    /// Implements FR-026 / FR-028..FR-031 of spec 022.
+    pub fn candidates_for(&self, scheme: &str) -> Vec<Arc<dyn MarketDataProvider + Send + Sync>> {
+        self.providers
             .iter()
             .filter(|p| scheme_matches(p.supported_schemes(), scheme))
             .cloned()
             .collect()
     }
+}
+
+fn sort_by_priority(providers: &mut [Arc<dyn MarketDataProvider + Send + Sync>]) {
+    providers.sort_by(|a, b| {
+        a.priority()
+            .cmp(&b.priority())
+            .then_with(|| a.source_id().cmp(b.source_id()))
+    });
 }
 
 /// Moves the named source to the front of the candidate list.
