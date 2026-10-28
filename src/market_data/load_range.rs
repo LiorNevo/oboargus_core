@@ -2,7 +2,7 @@
 //!
 //! Implements FR-014 of `specs/018-load-reference-data/spec.md`. Given a
 //! `from`/`to` range and a window size `x`, it drives the 018 primitive
-//! ([`run_identifier_load`]) once per **calendar day** in the range, with at
+//! ([`run_identifier_load`](crate::market_data::run_identifier_load)) once per **calendar day** in the range, with at
 //! most `x` dates in flight at a time, and aggregates the per-date execution
 //! reports into one deterministic range report.
 //!
@@ -158,7 +158,7 @@ pub struct IdentifierRangeLoadReport {
 
 /// Drives a range load: validate → fan out over dates → aggregate.
 ///
-/// Each date is one [`run_identifier_load`] call, so the single-date
+/// Each date is one [`run_identifier_load`](crate::market_data::run_identifier_load) call, so the single-date
 /// contract (outcomes, audit row, idempotence) is inherited unchanged. At
 /// most `config.concurrency` dates are in flight; the results are re-sorted
 /// by date before aggregation, so two runs of the same request produce
