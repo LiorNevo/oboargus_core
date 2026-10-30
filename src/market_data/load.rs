@@ -13,6 +13,8 @@
 //!
 //! Two additions layer on the primitive without changing it:
 //! `create_missing_assets` (FR-015/FR-016) resolves a missing asset through
+//! an exact identifier lookup, then an equivalent-ticker/profile lookup, so a
+//! case or venue variant does not create a duplicate instrument.
 //! an exact upstream lookup and creates it atomically before the fetch, and
 //! `load_range` (FR-014) drives this operation once per calendar day with a
 //! bounded window.
@@ -123,9 +125,9 @@ pub enum AssetCreation {
         /// Where the asset's currency came from.
         currency_source: CurrencySource,
     },
-    /// A concurrent creator won the unique-key race; this run adopted its
-    /// asset instead of failing (the mirror of the reference-data
-    /// collision rule, research D12).
+    /// A concurrent creator won the unique-key race, or the loader matched an
+    /// existing asset by equivalent ticker value or display profile; this run
+    /// adopted it instead of creating a duplicate.
     Adopted {
         /// The adopted asset's id.
         asset_id: Uuid,
@@ -174,6 +176,9 @@ pub enum CreationDecline {
     /// Several exact symbol matches were returned and the venue could not
     /// disambiguate them.
     AmbiguousMatch,
+    /// Several assets already claim equivalent ticker identifiers or the same
+    /// display profile; creating another would duplicate the instrument.
+    AmbiguousExistingAsset,
     /// The exact match trades on a different venue than the identifier
     /// names, or on a venue the upstream code cannot be mapped to.
     VenueMismatch,
@@ -668,6 +673,8 @@ async fn process_identifier(
     per_source_failed: &mut BTreeMap<String, usize>,
 ) -> LoadIdentifierOutcome {
     let as_of_date = config.as_of_date;
+    let identifier = canonical_identifier(identifier);
+    let identifier = &identifier;
 
     let resolved = match asset_identifier_read::find_asset_by_identifier(
         pool,
@@ -718,30 +725,75 @@ async fn process_identifier(
             );
         }
         None => {
-            let attempt = attempt_asset_creation(
-                pool,
-                snapshot,
-                identifier,
-                config,
-                counters,
-                per_source_attempted,
-                per_source_failed,
-            )
-            .await;
-            per_source = attempt.per_source;
-            creation = attempt.creation;
-
-            match attempt.asset {
-                Some(asset) => asset,
-                None => {
-                    let outcome = attempt.outcome.unwrap_or(LoadOutcome::NotResolved);
-                    counters.increment(outcome);
-                    // `not_resolved` stays outside the fetch-attempted
-                    // partition even when a creation lookup consulted a
-                    // source; a lookup that failed *is* an attempted line.
-                    let attempted = outcome != LoadOutcome::NotResolved;
+            match find_equivalent_ticker_asset(pool, identifier).await {
+                Ok(EquivalentAsset::One(asset)) => {
+                    counters.assets_adopted += 1;
+                    creation = AssetCreation::Adopted { asset_id: asset.id };
+                    asset
+                }
+                Ok(EquivalentAsset::Many) => {
+                    counters.not_resolved += 1;
                     return outcome_line(
-                        identifier, None, attempted, outcome, None, per_source, creation, None,
+                        identifier,
+                        None,
+                        false,
+                        LoadOutcome::NotResolved,
+                        None,
+                        Vec::new(),
+                        AssetCreation::Declined {
+                            reason: CreationDecline::AmbiguousExistingAsset,
+                        },
+                        None,
+                    );
+                }
+                Ok(EquivalentAsset::None) => {
+                    let attempt = attempt_asset_creation(
+                        pool,
+                        snapshot,
+                        identifier,
+                        config,
+                        counters,
+                        per_source_attempted,
+                        per_source_failed,
+                    )
+                    .await;
+                    per_source = attempt.per_source;
+                    creation = attempt.creation;
+
+                    match attempt.asset {
+                        Some(asset) => asset,
+                        None => {
+                            let outcome = attempt.outcome.unwrap_or(LoadOutcome::NotResolved);
+                            counters.increment(outcome);
+                            // `not_resolved` stays outside the fetch-attempted
+                            // partition even when a creation lookup consulted a
+                            // source; a lookup that failed *is* an attempted line.
+                            let attempted = outcome != LoadOutcome::NotResolved;
+                            return outcome_line(
+                                identifier, None, attempted, outcome, None, per_source, creation,
+                                None,
+                            );
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        identifier = ?identifier,
+                        error = %error,
+                        "equivalent ticker lookup failed"
+                    );
+                    counters.storage_failure += 1;
+                    return outcome_line(
+                        identifier,
+                        None,
+                        false,
+                        LoadOutcome::StorageFailure,
+                        None,
+                        Vec::new(),
+                        AssetCreation::Failed {
+                            error: error.to_string(),
+                        },
+                        None,
                     );
                 }
             }
@@ -986,6 +1038,47 @@ async fn attempt_asset_creation(
         issuer_id: None,
     };
 
+    match find_assets_by_profile(pool, &new_asset).await {
+        Ok(matches) if matches.len() == 1 => {
+            if let Some(asset) = matches.into_iter().next() {
+                let asset_id = asset.id;
+                counters.assets_adopted += 1;
+                return CreationAttempt {
+                    asset: Some(asset),
+                    creation: AssetCreation::Adopted { asset_id },
+                    outcome: None,
+                    per_source,
+                };
+            }
+        }
+        Ok(matches) if matches.len() > 1 => {
+            return CreationAttempt {
+                asset: None,
+                creation: AssetCreation::Declined {
+                    reason: CreationDecline::AmbiguousExistingAsset,
+                },
+                outcome: Some(LoadOutcome::NotResolved),
+                per_source,
+            };
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(
+                identifier = ?identifier,
+                error = %error,
+                "asset profile lookup failed"
+            );
+            return CreationAttempt {
+                asset: None,
+                creation: AssetCreation::Failed {
+                    error: error.to_string(),
+                },
+                outcome: Some(LoadOutcome::StorageFailure),
+                per_source,
+            };
+        }
+    }
+
     match create_asset_with_identifier(pool, new_asset, &identifier.scheme, &identifier.value).await
     {
         Ok(asset) => {
@@ -1139,12 +1232,88 @@ fn yahoo_exchange_mic(exchange: Option<&str>) -> Option<&'static str> {
     }
 }
 
+/// Canonicalizes an identifier before lookup and storage.
+///
+/// Ticker values are case-insensitive in practice, so ticker-like schemes are
+/// trimmed and uppercased. Other schemes keep their existing exact-match
+/// semantics.
+fn canonical_identifier(identifier: &TypedIdentifier) -> TypedIdentifier {
+    let scheme = identifier.scheme.trim().to_uppercase();
+    let value = if ticker_venue(&scheme).is_some() {
+        identifier.value.trim().to_uppercase()
+    } else {
+        identifier.value.trim().to_string()
+    };
+    TypedIdentifier::new(scheme, value)
+}
+
+/// The result of looking for an asset that already claims an equivalent ticker.
+enum EquivalentAsset {
+    None,
+    One(Asset),
+    Many,
+}
+
+/// Finds an asset with the same ticker value under any ticker scheme.
+///
+/// This catches the common duplicate forms `TICKER:QQQM`,
+/// `TICKER:XNAS:QQQM`, and case variants without merging distinct
+/// non-ticker identifiers. If more than one asset already matches, the
+/// caller refuses creation rather than guessing which instrument is meant.
+async fn find_equivalent_ticker_asset(
+    pool: &sqlx::PgPool,
+    identifier: &TypedIdentifier,
+) -> Result<EquivalentAsset, DomainError> {
+    if ticker_venue(&identifier.scheme).is_none() {
+        return Ok(EquivalentAsset::None);
+    }
+    let rows: Vec<Asset> = sqlx::query_as(
+        "SELECT DISTINCT a.id, a.asset_type, a.display_name, a.currency, a.created_at, \
+                a.backed_by_portfolio_id, a.issuer_id \
+         FROM assets a \
+         JOIN asset_identifiers i ON i.asset_id = a.id \
+         WHERE (upper(i.scheme) = 'TICKER' OR upper(i.scheme) LIKE 'TICKER:%') \
+           AND upper(i.value) = upper($1)",
+    )
+    .bind(&identifier.value)
+    .fetch_all(pool)
+    .await?;
+    match rows.len() {
+        0 => Ok(EquivalentAsset::None),
+        1 => match rows.into_iter().next() {
+            Some(asset) => Ok(EquivalentAsset::One(asset)),
+            None => Ok(EquivalentAsset::None),
+        },
+        _ => Ok(EquivalentAsset::Many),
+    }
+}
+
+/// Finds assets with the same display name, type, and currency.
+async fn find_assets_by_profile(
+    pool: &sqlx::PgPool,
+    asset: &NewAsset,
+) -> Result<Vec<Asset>, DomainError> {
+    let rows: Vec<Asset> = sqlx::query_as(
+        "SELECT a.id, a.asset_type, a.display_name, a.currency, a.created_at, \
+                a.backed_by_portfolio_id, a.issuer_id \
+         FROM assets a \
+         WHERE lower(a.display_name) = lower($1) \
+           AND a.asset_type = $2 \
+           AND a.currency = $3",
+    )
+    .bind(&asset.display_name)
+    .bind(&asset.asset_type)
+    .bind(&asset.currency)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Implements FR-015 of spec 018.
 /// The venue an identifier's scheme names, if it is a ticker scheme.
 ///
 /// `None` means "not a ticker scheme"; `Some(None)` means a bare `TICKER`;
 /// `Some(Some(mic))` means a venue-qualified `TICKER:<MIC>`.
-///
-/// Implements FR-015 of spec 018.
 fn ticker_venue(scheme: &str) -> Option<Option<&str>> {
     let scheme = scheme.trim();
     if scheme.eq_ignore_ascii_case("TICKER") {
@@ -2671,5 +2840,81 @@ mod tests {
         });
         let parsed: LoadIdentifierOutcome = serde_json::from_value(line).expect("deserialize");
         assert_eq!(parsed.asset_creation, AssetCreation::NotRequested);
+    }
+    #[test]
+    fn canonicalizes_ticker_values_but_not_other_schemes() {
+        let ticker = canonical_identifier(&TypedIdentifier::new(" ticker:xnas ", " qqqm "));
+        assert_eq!(ticker.scheme, "TICKER:XNAS");
+        assert_eq!(ticker.value, "QQQM");
+
+        let isin = canonical_identifier(&TypedIdentifier::new(" isin ", " us0378331005 "));
+        assert_eq!(isin.scheme, "ISIN");
+        assert_eq!(isin.value, "us0378331005");
+    }
+
+    #[tokio::test]
+    async fn equivalent_ticker_lookup_matches_case_and_venue_variants() {
+        let Some((pool, _guard)) = crate::common::tx_pool().await else {
+            return;
+        };
+        let asset = create_asset_with_identifier(
+            &pool,
+            NewAsset {
+                asset_type: "MUTUALFUND".to_string(),
+                display_name: "Duplicate Guard Fund".to_string(),
+                currency: "USD".to_string(),
+                backed_by_portfolio_id: None,
+                issuer_id: None,
+            },
+            "TICKER",
+            "QQQM",
+        )
+        .await
+        .expect("create asset");
+
+        let found =
+            find_equivalent_ticker_asset(&pool, &TypedIdentifier::new("TICKER:XNAS", "qqqm"))
+                .await
+                .expect("equivalent lookup");
+        match found {
+            EquivalentAsset::One(candidate) => assert_eq!(candidate.id, asset.id),
+            _ => panic!("expected one equivalent asset"),
+        }
+    }
+
+    #[tokio::test]
+    async fn profile_lookup_finds_an_existing_asset() {
+        let Some((pool, _guard)) = crate::common::tx_pool().await else {
+            return;
+        };
+        let asset = create_asset_with_identifier(
+            &pool,
+            NewAsset {
+                asset_type: "MUTUALFUND".to_string(),
+                display_name: "Profile Guard Fund".to_string(),
+                currency: "USD".to_string(),
+                backed_by_portfolio_id: None,
+                issuer_id: None,
+            },
+            "TICKER",
+            "PROF",
+        )
+        .await
+        .expect("create asset");
+
+        let matches = find_assets_by_profile(
+            &pool,
+            &NewAsset {
+                asset_type: "MUTUALFUND".to_string(),
+                display_name: "profile guard fund".to_string(),
+                currency: "USD".to_string(),
+                backed_by_portfolio_id: None,
+                issuer_id: None,
+            },
+        )
+        .await
+        .expect("profile lookup");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, asset.id);
     }
 }
