@@ -7,9 +7,11 @@
 
 use chrono::{DateTime, Utc};
 use obolargus_core::domain::id::{AssetId, DomainId};
-use obolargus_core::temporal::facts::read::{fact_as_known, fact_at, fact_history};
+use obolargus_core::temporal::facts::read::{
+    fact_as_known, fact_at, fact_history, fact_series_page,
+};
 use obolargus_core::temporal::facts::write::{append_fact, revoke_fact};
-use obolargus_core::temporal::{FactSubject, KnownAt, TemporalError, ValidAt};
+use obolargus_core::temporal::{FactSubject, KnownAt, TemporalError, TemporalWindow, ValidAt};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -323,4 +325,47 @@ async fn two_sources_cannot_overwrite_each_other() {
     assert_eq!(history.len(), 2, "source is part of the identity key");
 
     guard.cleanup().await;
+}
+
+#[tokio::test]
+async fn series_pages_forward_and_reports_more() {
+    let Some((pool, _guard)) = obolargus_core::common::tx_pool().await else {
+        return;
+    };
+    let subject = seed_asset(&pool).await;
+    for day in ["2026-01-02", "2026-01-05", "2026-01-06"] {
+        append_fact(
+            &pool,
+            subject,
+            "market_price",
+            valid(&format!("{day}T00:00:00Z")),
+            known("2026-01-07T12:00:00Z"),
+            r#"{"close":"1.00"}"#,
+            "test",
+        )
+        .await
+        .expect("append");
+    }
+
+    let window = TemporalWindow::new(valid("2026-01-01T00:00:00Z"), valid("2026-02-01T00:00:00Z"))
+        .expect("window");
+    let first = fact_series_page(&pool, subject, "market_price", window, None, None, 2)
+        .await
+        .expect("first page");
+    assert_eq!(first.points.len(), 2);
+    assert!(first.has_more);
+    let cursor = first.points.last().expect("cursor").valid_at;
+    let second = fact_series_page(
+        &pool,
+        subject,
+        "market_price",
+        window,
+        None,
+        Some(cursor),
+        2,
+    )
+    .await
+    .expect("second page");
+    assert_eq!(second.points.len(), 1);
+    assert!(!second.has_more);
 }

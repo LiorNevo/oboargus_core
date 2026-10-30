@@ -86,3 +86,27 @@ pub struct AssetFilter {
     /// Filter by issuer, if set.
     pub issuer_id: Option<IssuerId>,
 }
+
+/// One asset-search result used by the instrument picker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct AssetOption {
+    /// The asset id.
+    pub id: uuid::Uuid,
+    /// The human-readable display name.
+    pub display_name: String,
+    /// The asset type (e.g. `"stock"`).
+    pub asset_type: String,
+    /// The ISO 4217 currency code.
+    pub currency: String,
+    /// The preferred ticker or the oldest identifier, when one exists.
+    pub primary_identifier: Option<String>,
+}
+
+/// Parameters for [`search_asset_options`](super::read::search_asset_options).
+#[derive(Debug, Clone, Default)]
+pub struct AssetSearchQuery {
+    /// Free-text query; empty or `None` matches every asset.
+    pub q: Option<String>,
+    /// Maximum results; callers pass a validated value, core clamps to 1..=50.
+    pub limit: u32,
+}

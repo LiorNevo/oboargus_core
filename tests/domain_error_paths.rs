@@ -25,8 +25,8 @@ use rust_decimal::Decimal;
 
 use obolargus_core::domain::asset::create::create_asset;
 use obolargus_core::domain::asset::delete::delete_asset;
-use obolargus_core::domain::asset::entity::{AssetFilter, AssetPatch, NewAsset};
-use obolargus_core::domain::asset::read::list_assets;
+use obolargus_core::domain::asset::entity::{AssetFilter, AssetPatch, AssetSearchQuery, NewAsset};
+use obolargus_core::domain::asset::read::{list_assets, search_asset_options};
 use obolargus_core::domain::asset::update::update_asset;
 use obolargus_core::domain::asset_identifier::create::create_asset_identifier;
 use obolargus_core::domain::asset_identifier::entity::NewAssetIdentifier;
@@ -1037,4 +1037,75 @@ fn event_type_labels_cover_every_variant() {
         EventType::StockBasedCompensation.as_str(),
         "stock-based-compensation"
     );
+}
+
+/// Asset search matches identifiers and escapes user wildcards.
+#[tokio::test]
+async fn asset_search_matches_identifiers_and_escapes_wildcards() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        return;
+    };
+
+    let asset = create_asset(
+        &pool,
+        NewAsset {
+            asset_type: "EQUITY".to_string(),
+            display_name: "Searchable Widget".to_string(),
+            currency: "USD".to_string(),
+            backed_by_portfolio_id: None,
+            issuer_id: None,
+        },
+    )
+    .await
+    .expect("create asset");
+    create_asset_identifier(
+        &pool,
+        NewAssetIdentifier {
+            asset_id: asset.id(),
+            scheme: "TICKER".to_string(),
+            value: "SRCH".to_string(),
+        },
+    )
+    .await
+    .expect("create identifier");
+
+    let by_ticker = search_asset_options(
+        &pool,
+        AssetSearchQuery {
+            q: Some("srch".to_string()),
+            limit: 10,
+        },
+    )
+    .await
+    .expect("search by ticker");
+    assert!(by_ticker.iter().any(|option| option.id == asset.id));
+    assert_eq!(
+        by_ticker
+            .iter()
+            .find(|option| option.id == asset.id)
+            .and_then(|option| option.primary_identifier.clone()),
+        Some("SRCH".to_string())
+    );
+
+    let by_name = search_asset_options(
+        &pool,
+        AssetSearchQuery {
+            q: Some("searchable".to_string()),
+            limit: 10,
+        },
+    )
+    .await
+    .expect("search by name");
+    assert!(by_name.iter().any(|option| option.id == asset.id));
+
+    let wildcard = search_asset_options(
+        &pool,
+        AssetSearchQuery {
+            q: Some("%".to_string()),
+            limit: 10,
+        },
+    )
+    .await
+    .expect("escaped wildcard");
+    assert!(wildcard.iter().all(|option| option.id != asset.id));
 }

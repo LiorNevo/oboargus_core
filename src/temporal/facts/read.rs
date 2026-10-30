@@ -177,3 +177,61 @@ pub fn parse_known_at(raw: &str) -> Result<KnownAt, TemporalError> {
         .map_err(|error| TemporalError::invalid_time(format!("{raw:?}: {error}")))?;
     KnownAt::new(parsed)
 }
+
+/// One page of a resolved series.
+#[derive(Debug, Clone)]
+pub struct FactSeriesPage {
+    /// The resolved points in ascending valid time.
+    pub points: Vec<FactPoint>,
+    /// True when at least one more point exists after this page.
+    pub has_more: bool,
+}
+
+/// A paginated resolved series over a window.
+///
+/// Resolves the latest knowledge per valid instant first, removes retracted
+/// winners, then applies the optional `after` cursor and page size. The
+/// existing [`fact_series`] keeps its signature and behavior.
+pub async fn fact_series_page(
+    pool: &PgPool,
+    subject: FactSubject,
+    fact_type: &str,
+    window: TemporalWindow,
+    known_at: Option<KnownAt>,
+    after: Option<ValidAt>,
+    limit: u32,
+) -> Result<FactSeriesPage, TemporalError> {
+    let bounded = limit.clamp(1, 20_000) as i64;
+    let fetch = bounded + 1;
+    let rows: Vec<FactRow> = sqlx::query_as(AssertSqlSafe(format!(
+        "SELECT * FROM ( \
+           SELECT DISTINCT ON (valid_at) {} FROM {} \
+            WHERE {} = $1 AND fact_type = $2 AND valid_at >= $3 AND valid_at < $4 \
+              AND ($5::timestamptz IS NULL OR known_at <= $5) \
+            ORDER BY valid_at, known_at DESC, id DESC \
+         ) resolved \
+         WHERE NOT retracted \
+           AND ($6::timestamptz IS NULL OR valid_at > $6) \
+         ORDER BY valid_at ASC \
+         LIMIT $7",
+        column_list(subject),
+        subject.table(),
+        subject.subject_column()
+    )))
+    .bind(subject.id())
+    .bind(fact_type)
+    .bind(window.from.as_datetime())
+    .bind(window.to.as_datetime())
+    .bind(known_at.map(|instant| instant.as_datetime()))
+    .bind(after.map(|instant| instant.as_datetime()))
+    .bind(fetch)
+    .fetch_all(pool)
+    .await?;
+
+    let has_more = rows.len() > bounded as usize;
+    let mut points = Vec::with_capacity(rows.len().min(bounded as usize));
+    for row in rows.into_iter().take(bounded as usize) {
+        points.push(row_to_fact_point(row, subject)?);
+    }
+    Ok(FactSeriesPage { points, has_more })
+}
