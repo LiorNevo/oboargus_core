@@ -237,7 +237,7 @@ pub async fn seed_temporal_fixture(pool: &PgPool) {
         sqlx::query(
             "INSERT INTO asset_reference_data \
                 (id, asset_id, fact_type, valid_at, known_at, value, source, retracted) \
-             VALUES ($1, $2, 'market_price', '2026-01-02T00:00:00Z', $3, $4, 'fixture', $5)",
+             VALUES ($1, $2, 'market_price', '2026-01-02T00:00:00Z', $3::timestamptz, $4, 'fixture', $5)",
         )
         .bind(id)
         .bind(temporal_ids::ASSET)
