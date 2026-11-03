@@ -18,6 +18,9 @@
 
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use chrono::{NaiveDate, Utc};
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -195,8 +198,41 @@ pub async fn run_identifier_range_load_with_group(
     group_id: Uuid,
     data_domain: DataDomain,
 ) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
+    run_identifier_range_load_with_group_cancellable(
+        pool,
+        registry,
+        config,
+        group_id,
+        data_domain,
+        None,
+    )
+    .await
+}
+
+/// Range load with an optional cooperative cancellation flag.
+///
+/// The flag is checked before each date starts. Dates already in flight are
+/// allowed to finish so their audit rows are never left half-written.
+///
+/// Implements FR-014 of spec 018 and FR-031 of spec 022.
+pub async fn run_identifier_range_load_with_group_cancellable(
+    pool: Option<&sqlx::PgPool>,
+    registry: &DataSourceRegistry,
+    config: IdentifierRangeLoadConfig,
+    group_id: Uuid,
+    data_domain: DataDomain,
+    cancel: Option<Arc<AtomicBool>>,
+) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
     let snapshot = registry.snapshot();
-    run_identifier_range_load_with_snapshot(pool, &snapshot, config, group_id, data_domain).await
+    run_identifier_range_load_with_snapshot_cancellable(
+        pool,
+        &snapshot,
+        config,
+        group_id,
+        data_domain,
+        cancel,
+    )
+    .await
 }
 
 /// Range load over an already-taken snapshot.
@@ -210,6 +246,25 @@ pub async fn run_identifier_range_load_with_snapshot(
     config: IdentifierRangeLoadConfig,
     group_id: Uuid,
     data_domain: DataDomain,
+) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
+    run_identifier_range_load_with_snapshot_cancellable(
+        pool,
+        snapshot,
+        config,
+        group_id,
+        data_domain,
+        None,
+    )
+    .await
+}
+
+async fn run_identifier_range_load_with_snapshot_cancellable(
+    pool: Option<&sqlx::PgPool>,
+    snapshot: &RegistrySnapshot,
+    config: IdentifierRangeLoadConfig,
+    group_id: Uuid,
+    data_domain: DataDomain,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
     validate_range_request_with_snapshot(&config, snapshot)?;
 
@@ -232,15 +287,23 @@ pub async fn run_identifier_range_load_with_snapshot(
             range_to,
             concurrency as i32,
         );
+        let cancel = cancel.clone();
         async move {
-            (
+            if cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                return None;
+            }
+            Some((
                 date,
                 run_identifier_load_with_snapshot(pool, snapshot, per_date, &per_date_context)
                     .await,
-            )
+            ))
         }
     }))
     .buffer_unordered(concurrency)
+    .filter_map(|item| async move { item })
     .collect()
     .await;
 
