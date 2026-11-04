@@ -517,6 +517,7 @@ mod tests {
     use async_trait::async_trait;
     use rust_decimal::Decimal;
 
+    use crate::market_data::data_domain::DataDomain;
     use crate::market_data::load::{DEFAULT_ASSET_CURRENCY, LoadOutcome};
     use crate::market_data::trait_::MarketDataProvider;
     use crate::market_data::types::{
@@ -720,6 +721,54 @@ mod tests {
             }
         }
         assert_eq!(report.totals.assets_created, 0);
+    }
+
+    #[tokio::test]
+    async fn the_group_wrapper_returns_a_dry_run_report() {
+        let report = run_identifier_range_load_with_group(
+            None,
+            &registry(),
+            config("2026-10-01", "2026-10-03", 2),
+            Uuid::new_v4(),
+            DataDomain::MarketData,
+        )
+        .await
+        .expect("report");
+        assert_eq!(report.dates.len(), 3);
+        assert_eq!(report.dates_requested, 3);
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_the_first_date_skips_every_date() {
+        let cancel = Arc::new(AtomicBool::new(true));
+        let report = run_identifier_range_load_with_group_cancellable(
+            None,
+            &registry(),
+            config("2026-10-01", "2026-10-05", 2),
+            Uuid::new_v4(),
+            DataDomain::MarketData,
+            Some(cancel),
+        )
+        .await
+        .expect("report");
+        assert_eq!(report.dates.len(), 0);
+        assert_eq!(report.dates_requested, 0);
+        assert_eq!(report.status, RunStatus::Complete);
+    }
+
+    #[tokio::test]
+    async fn cancellable_runs_without_a_flag_behave_like_the_normal_path() {
+        let report = run_identifier_range_load_with_group_cancellable(
+            None,
+            &registry(),
+            config("2026-10-01", "2026-10-02", 1),
+            Uuid::new_v4(),
+            DataDomain::MarketData,
+            None,
+        )
+        .await
+        .expect("report");
+        assert_eq!(report.dates.len(), 2);
     }
 
     #[tokio::test]
