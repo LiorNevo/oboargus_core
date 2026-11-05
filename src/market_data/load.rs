@@ -39,12 +39,14 @@ use crate::domain::time_support::{now_micros, one_microsecond_after, utc_midnigh
 use crate::market_data::audit::{LoadRunContext, finish_load_run, start_load_run_with_context};
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
+use crate::market_data::identifier_mapping::{
+    canonical_asset_type, canonical_identifier, derive_currency, derive_display_name,
+    hit_matches_venue, is_plausible_symbol, ticker_venue,
+};
 use crate::market_data::registry::{
     DataSourceRegistry, RegistrySnapshot, TickerLookupMatch, TickerLookupWalk,
 };
-use crate::market_data::types::{
-    HistoricalRangeRequest, PriceBar, TickerLookupHit, TypedIdentifier,
-};
+use crate::market_data::types::{HistoricalRangeRequest, PriceBar, TypedIdentifier};
 
 /// Fact type written by the load operation for end-of-day OHLCV bars.
 ///
@@ -144,18 +146,7 @@ pub enum AssetCreation {
     },
 }
 
-/// Where a created asset's currency came from.
-///
-/// Implements FR-015 of spec 018.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub enum CurrencySource {
-    /// The upstream lookup returned a currency.
-    Upstream,
-    /// The upstream omitted it and the configured default was used.
-    ConfiguredDefault,
-}
+pub use crate::market_data::identifier_mapping::CurrencySource;
 
 /// Why the creation path refused to create an asset.
 ///
@@ -1205,48 +1196,6 @@ fn choose_lookup_match<'a>(
     Ok(candidate)
 }
 
-/// Whether a lookup hit trades on the identifier's venue.
-///
-/// Implements FR-015 of spec 018.
-fn hit_matches_venue(hit: &TickerLookupHit, venue: &str) -> bool {
-    yahoo_exchange_mic(hit.exchange.as_deref()).is_some_and(|mic| mic.eq_ignore_ascii_case(venue))
-}
-
-/// Maps Yahoo's exchange code to a MIC.
-///
-/// The upstream search endpoint reports venue codes such as `NMS`, not the
-/// MICs the identifier schemes use; an unmapped code is treated as
-/// unverifiable, never as a match.
-///
-/// Implements FR-015 of spec 018.
-fn yahoo_exchange_mic(exchange: Option<&str>) -> Option<&'static str> {
-    let code = exchange?.trim().to_ascii_uppercase();
-    match code.as_str() {
-        "NMS" | "NGM" | "NCM" | "NAS" => Some("XNAS"),
-        "NYQ" | "NYS" => Some("XNYS"),
-        "PCX" | "PSE" => Some("ARCX"),
-        "ASE" | "AMEX" => Some("XASE"),
-        "BTS" | "BATS" => Some("BATS"),
-        "OTC" | "PNK" | "OQX" | "OB" => Some("OTC"),
-        _ => None,
-    }
-}
-
-/// Canonicalizes an identifier before lookup and storage.
-///
-/// Ticker values are case-insensitive in practice, so ticker-like schemes are
-/// trimmed and uppercased. Other schemes keep their existing exact-match
-/// semantics.
-fn canonical_identifier(identifier: &TypedIdentifier) -> TypedIdentifier {
-    let scheme = identifier.scheme.trim().to_uppercase();
-    let value = if ticker_venue(&scheme).is_some() {
-        identifier.value.trim().to_uppercase()
-    } else {
-        identifier.value.trim().to_string()
-    };
-    TypedIdentifier::new(scheme, value)
-}
-
 /// The result of looking for an asset that already claims an equivalent ticker.
 enum EquivalentAsset {
     None,
@@ -1307,92 +1256,6 @@ async fn find_assets_by_profile(
     .fetch_all(pool)
     .await?;
     Ok(rows)
-}
-
-/// Implements FR-015 of spec 018.
-/// The venue an identifier's scheme names, if it is a ticker scheme.
-///
-/// `None` means "not a ticker scheme"; `Some(None)` means a bare `TICKER`;
-/// `Some(Some(mic))` means a venue-qualified `TICKER:<MIC>`.
-fn ticker_venue(scheme: &str) -> Option<Option<&str>> {
-    let scheme = scheme.trim();
-    if scheme.eq_ignore_ascii_case("TICKER") {
-        return Some(None);
-    }
-    let (prefix, venue) = scheme.split_once(':')?;
-    if prefix.eq_ignore_ascii_case("TICKER") && !venue.trim().is_empty() {
-        Some(Some(venue.trim()))
-    } else {
-        None
-    }
-}
-
-/// Whether a value is a plausible ticker symbol.
-///
-/// Implements FR-015 of spec 018.
-fn is_plausible_symbol(value: &str) -> bool {
-    let value = value.trim();
-    !value.is_empty()
-        && value.len() <= 20
-        && value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
-}
-
-/// Maps an upstream quote type onto the canonical asset-type vocabulary.
-///
-/// An unknown quote type is refused rather than guessed: a wrong asset type
-/// is worse than an unresolved identifier.
-///
-/// Implements FR-015 of spec 018.
-fn canonical_asset_type(quote_type: Option<&str>) -> Option<&'static str> {
-    let quote_type = quote_type?.trim().to_ascii_uppercase();
-    match quote_type.as_str() {
-        "EQUITY" | "STOCK" => Some("EQUITY"),
-        "ETF" => Some("ETF"),
-        "MUTUALFUND" | "MUTUAL_FUND" | "MUTUAL FUND" => Some("MUTUALFUND"),
-        "INDEX" => Some("INDEX"),
-        "CURRENCY" => Some("CURRENCY"),
-        "CRYPTOCURRENCY" | "CRYPTO" => Some("CRYPTO"),
-        "FUTURE" => Some("FUTURE"),
-        _ => None,
-    }
-}
-
-/// Derives a created asset's display name.
-///
-/// Implements FR-015 of spec 018.
-fn derive_display_name(hit: &TickerLookupHit) -> String {
-    hit.short_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .or_else(|| {
-            hit.long_name
-                .as_deref()
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-        })
-        .unwrap_or_else(|| hit.symbol.trim())
-        .to_string()
-}
-
-/// Derives a created asset's currency and records its provenance.
-///
-/// Implements FR-015 of spec 018.
-fn derive_currency(hit: &TickerLookupHit, default_currency: &str) -> (String, CurrencySource) {
-    match hit
-        .currency
-        .as_deref()
-        .map(str::trim)
-        .filter(|currency| !currency.is_empty())
-    {
-        Some(currency) => (currency.to_ascii_uppercase(), CurrencySource::Upstream),
-        None => (
-            default_currency.trim().to_ascii_uppercase(),
-            CurrencySource::ConfiguredDefault,
-        ),
-    }
 }
 
 /// Whether an error is the identifier-uniqueness race, not a real failure.
@@ -1799,8 +1662,8 @@ mod tests {
 
     use crate::market_data::trait_::MarketDataProvider;
     use crate::market_data::types::{
-        HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, TickerLookupRequest,
-        TickerLookupResult,
+        HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, TickerLookupHit,
+        TickerLookupRequest, TickerLookupResult,
     };
 
     /// A provider whose per-identifier historical answers are scripted.
@@ -2681,68 +2544,6 @@ mod tests {
         }
     }
 
-    /// Only ticker schemes are eligible, and a venue qualifier is retained.
-    #[test]
-    fn ticker_venue_classifies_schemes() {
-        assert_eq!(ticker_venue("TICKER"), Some(None));
-        assert_eq!(ticker_venue("ticker"), Some(None));
-        assert_eq!(ticker_venue("TICKER:XNAS"), Some(Some("XNAS")));
-        assert_eq!(ticker_venue("ticker:xnas"), Some(Some("xnas")));
-        assert_eq!(ticker_venue("ISIN"), None);
-        assert_eq!(ticker_venue("CUSIP"), None);
-        assert_eq!(ticker_venue("TICKER:"), None);
-    }
-
-    /// A plausible symbol is short and ASCII; anything else is refused.
-    #[test]
-    fn symbols_are_validated_conservatively() {
-        assert!(is_plausible_symbol("AAPL"));
-        assert!(is_plausible_symbol("BRK.B"));
-        assert!(is_plausible_symbol("RDS-A"));
-        assert!(!is_plausible_symbol(""));
-        assert!(!is_plausible_symbol("   "));
-        assert!(!is_plausible_symbol("AAPL; DROP TABLE"));
-        assert!(!is_plausible_symbol(&"A".repeat(21)));
-    }
-
-    /// The asset-type map is canonical and closed.
-    #[test]
-    fn asset_types_map_to_a_closed_vocabulary() {
-        assert_eq!(canonical_asset_type(Some("EQUITY")), Some("EQUITY"));
-        assert_eq!(canonical_asset_type(Some("etf")), Some("ETF"));
-        assert_eq!(canonical_asset_type(Some("MUTUALFUND")), Some("MUTUALFUND"));
-        assert_eq!(canonical_asset_type(Some("INDEX")), Some("INDEX"));
-        assert_eq!(canonical_asset_type(None), None);
-        assert_eq!(canonical_asset_type(Some("SOMETHING_NEW")), None);
-    }
-
-    /// Display name prefers the short name, then the long name, then the
-    /// symbol.
-    #[test]
-    fn display_name_falls_back_in_order() {
-        let mut hit = lookup_hit("QQQM", "NMS");
-        assert_eq!(derive_display_name(&hit), "Short Name");
-        hit.short_name = Some("  ".to_string());
-        assert_eq!(derive_display_name(&hit), "A Longer Name");
-        hit.long_name = None;
-        assert_eq!(derive_display_name(&hit), "QQQM");
-    }
-
-    /// Currency provenance is recorded, never guessed silently.
-    #[test]
-    fn currency_records_its_provenance() {
-        let mut hit = lookup_hit("QQQM", "NMS");
-        assert_eq!(
-            derive_currency(&hit, "usd"),
-            ("USD".to_string(), CurrencySource::ConfiguredDefault)
-        );
-        hit.currency = Some("eur".to_string());
-        assert_eq!(
-            derive_currency(&hit, "USD"),
-            ("EUR".to_string(), CurrencySource::Upstream)
-        );
-    }
-
     /// A bare ticker must resolve unambiguously.
     #[test]
     fn an_ambiguous_bare_ticker_is_refused() {
@@ -2782,16 +2583,6 @@ mod tests {
             choose_lookup_match(&matches, Some("XLON")).expect_err("mismatch"),
             CreationDecline::VenueMismatch
         );
-    }
-
-    /// Yahoo's exchange codes map onto MICs; unknown codes do not.
-    #[test]
-    fn yahoo_exchanges_map_to_mics() {
-        assert_eq!(yahoo_exchange_mic(Some("NMS")), Some("XNAS"));
-        assert_eq!(yahoo_exchange_mic(Some("nyq")), Some("XNYS"));
-        assert_eq!(yahoo_exchange_mic(Some("PCX")), Some("ARCX"));
-        assert_eq!(yahoo_exchange_mic(Some("GER")), None);
-        assert_eq!(yahoo_exchange_mic(None), None);
     }
 
     /// The creation record serializes to the contract names.

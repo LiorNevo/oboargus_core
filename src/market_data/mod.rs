@@ -21,6 +21,8 @@ pub mod data_domain;
 pub mod data_sources;
 pub mod error;
 pub mod history;
+pub mod identifier_mapping;
+pub mod identifier_search;
 pub mod load;
 pub mod load_range;
 pub mod reconcile;

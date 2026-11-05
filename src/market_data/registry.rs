@@ -65,6 +65,25 @@ pub struct SourceCatalogEntry {
     pub unavailable_reason: Option<String>,
 }
 
+/// One source's answer (or typed failure) during an identifier search.
+///
+/// Unlike [`SourceFailure`], this keeps successful answers and every failing
+/// source, so the Data Load search can disclose partial failure instead of
+/// silently dropping it.
+///
+/// Implements FR-026 / FR-027 of `specs/026-identifier-search/spec.md`.
+#[derive(Debug, Clone)]
+pub struct SourceLookupOutcome {
+    /// The stable configured id.
+    pub source_id: String,
+    /// Operator-facing label.
+    pub display_name: String,
+    /// Numeric priority (lower = tried first).
+    pub priority: i32,
+    /// The source's answer or its typed error.
+    pub result: Result<TickerLookupResult, MarketDataProviderError>,
+}
+
 /// One source's failure during a registry walk.
 ///
 /// The orchestrator records these in `data_source_refresh_runs.per_source_failed`
@@ -712,6 +731,54 @@ impl RegistrySnapshot {
         out
     }
 
+    /// Enabled providers that can serve `domain` and answer a free-text
+    /// ticker lookup.
+    ///
+    /// Implements FR-003 of `specs/026-identifier-search/spec.md`.
+    pub fn search_providers(
+        &self,
+        domain: &DataDomain,
+    ) -> Vec<Arc<dyn MarketDataProvider + Send + Sync>> {
+        self.providers
+            .iter()
+            .filter(|provider| {
+                provider
+                    .supported_data_domains()
+                    .iter()
+                    .any(|value| value == domain.as_str())
+                    && supports_ticker_lookup(provider.supported_schemes())
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Asks every eligible source for a free-text ticker/name lookup
+    /// concurrently, keeping each typed outcome.
+    ///
+    /// Implements FR-003 / FR-026 / FR-028 of
+    /// `specs/026-identifier-search/spec.md`.
+    pub async fn search_ticker_lookup(
+        &self,
+        query: &str,
+        domain: &DataDomain,
+    ) -> Vec<SourceLookupOutcome> {
+        let providers = self.search_providers(domain);
+        let query = query.to_string();
+        let futures = providers.iter().map(|provider| {
+            let query = query.clone();
+            async move {
+                let result = provider.lookup_ticker(TickerLookupRequest { query }).await;
+                SourceLookupOutcome {
+                    source_id: provider.source_id().to_string(),
+                    display_name: provider.display_name().to_string(),
+                    priority: provider.priority(),
+                    result,
+                }
+            }
+        });
+        futures::future::join_all(futures).await
+    }
+
     /// Filters the snapshot to providers whose `supported_schemes` contains
     /// `scheme` (with `TICKER:*` matching any `TICKER:XXX`).
     /// Implements FR-026 / FR-028..FR-031 of spec 022.
@@ -749,6 +816,13 @@ fn move_to_front(
         let preferred = candidates.remove(index);
         candidates.insert(0, preferred);
     }
+}
+
+/// Whether a source declares it can answer free-text ticker lookups.
+fn supports_ticker_lookup(supported: &[String]) -> bool {
+    supported
+        .iter()
+        .any(|scheme| matches!(scheme.as_str(), "TICKER" | "TICKER:*" | "*"))
 }
 
 fn scheme_matches(supported: &[String], scheme: &str) -> bool {
