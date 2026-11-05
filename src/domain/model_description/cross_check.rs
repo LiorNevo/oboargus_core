@@ -49,19 +49,20 @@ fn position_has_four_fields() {
 }
 
 #[test]
-fn reference_data_entities_have_seven_fields_each() {
+fn fact_model_entities_have_the_declared_fields() {
     let desc = model_description();
-    for name in &[
-        "AssetReferenceData",
-        "IssuerReferenceData",
-        "PortfolioReferenceData",
+    for (name, fields) in [
+        ("TemporalFact", 10),
+        ("FactType", 10),
+        ("FactField", 11),
+        ("MarketObservation", 18),
     ] {
         let e = desc
             .entities
             .iter()
-            .find(|e| e.name == *name)
+            .find(|e| e.name == name)
             .unwrap_or_else(|| panic!("{}", name));
-        assert_eq!(e.fields.len(), 7, "{} should have 7 fields", name);
+        assert_eq!(e.fields.len(), fields, "{} field count", name);
     }
 }
 
@@ -90,16 +91,15 @@ fn rule_entity_has_seven_fields() {
 }
 
 #[test]
-fn fifteen_relationships() {
+fn normalized_fact_model_relationships() {
     let desc = model_description();
-    // 11 original + issuer parent_of + 2 identified_by + governed_by
-    assert_eq!(desc.relationships.len(), 15);
+    // 15 predecessor edges + 1 observation edge + 3 catalog edges
+    assert_eq!(desc.relationships.len(), 19);
 }
 
 #[test]
-fn sixteen_invariants() {
+fn normalized_fact_model_invariants() {
     let desc = model_description();
-    // 11 original + issuer DAG acyclicity + identifier uniqueness
-    // + 3 rule invariants
-    assert_eq!(desc.invariants.len(), 16);
+    // 16 predecessor invariants + 4 normalized-fact invariants
+    assert_eq!(desc.invariants.len(), 20);
 }

@@ -139,6 +139,10 @@ pub struct DataSourceConfig {
     /// Data domains this source can serve (FR-027 of spec 022).
     #[serde(default = "default_data_domains")]
     pub supported_data_domains: Vec<String>,
+    /// Catalog fact types this source can provide. The default is the
+    /// market-price observation every market-data provider serves.
+    #[serde(default = "default_fact_types")]
+    pub supported_fact_types: Vec<String>,
     /// Optional per-source rate-limit (requests per minute). `None` ⇒
     /// upstream default (10 req/s with the `governor` feature).
     #[serde(default)]
@@ -156,6 +160,11 @@ pub struct DataSourceConfig {
     /// Retry configuration for transient errors.
     #[serde(default)]
     pub retry: RetryConfig,
+}
+
+/// Serde default for `supported_fact_types` (`market_price`).
+fn default_fact_types() -> Vec<String> {
+    vec!["market_price".to_string()]
 }
 
 /// Serde default for `enabled` (true).
@@ -221,6 +230,7 @@ impl DataSourceConfig {
                 "CUSIP".into(),
             ],
             supported_data_domains: vec!["market_data".into()],
+            supported_fact_types: vec!["market_price".into()],
             rate_limit_per_minute: Some(60),
             api_key_env_var: None,
             user_agent: Some("obolargus/0.1.0 (+https://obolargus.example)".into()),

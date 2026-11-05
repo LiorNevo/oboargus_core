@@ -7,10 +7,12 @@
 use chrono::{DateTime, Utc};
 use obolargus_core::common::{seed_temporal_fixture, tx_pool};
 use obolargus_core::domain::id::{AssetId, DomainId, IssuerId, PortfolioId};
-use obolargus_core::temporal::facts::write::append_fact;
 use obolargus_core::temporal::verify::{verify_lookahead, verify_parity};
+use obolargus_core::temporal::{FactInput, FactValue, write_fact};
 use obolargus_core::temporal::{FactSubject, KnownAt, ValidAt};
+use rust_decimal::Decimal;
 use sqlx::PgPool;
+use std::str::FromStr;
 use uuid::Uuid;
 
 fn instant(raw: &str) -> DateTime<Utc> {
@@ -71,18 +73,36 @@ async fn parity_verifies_asset_issuer_and_portfolio_facts() {
     .await;
 
     for (subject, fact_type, value) in [
-        (asset, "market_price", "100.00"),
-        (issuer, "rating", "AA"),
-        (portfolio, "benchmark", "SPX"),
+        (
+            asset,
+            "nav",
+            FactValue::Decimal {
+                value: Decimal::from_str("100.00").expect("decimal"),
+            },
+        ),
+        (
+            issuer,
+            "credit_rating",
+            FactValue::Text { value: "AA".into() },
+        ),
+        (
+            portfolio,
+            "benchmark",
+            FactValue::Text {
+                value: "SPX".into(),
+            },
+        ),
     ] {
-        append_fact(
+        write_fact(
             &pool,
-            subject,
-            fact_type,
-            valid("2026-01-02T00:00:00Z"),
-            known("2026-01-02T12:00:00Z"),
-            value,
-            "fixture",
+            FactInput {
+                subject,
+                fact_type: fact_type.to_string(),
+                valid_at: valid("2026-01-02T00:00:00Z"),
+                known_at: known("2026-01-02T12:00:00Z"),
+                source: "fixture".to_string(),
+                value,
+            },
         )
         .await
         .expect("append fact");
@@ -109,14 +129,18 @@ async fn parity_date_filters_and_lookahead_samples_are_bounded() {
         Uuid::new_v4(),
     )
     .await;
-    append_fact(
+    write_fact(
         &pool,
-        asset,
-        "market_price",
-        valid("2026-01-02T00:00:00Z"),
-        known("2026-01-02T12:00:00Z"),
-        "100.00",
-        "fixture",
+        FactInput {
+            subject: asset,
+            fact_type: "nav".to_string(),
+            valid_at: valid("2026-01-02T00:00:00Z"),
+            known_at: known("2026-01-02T12:00:00Z"),
+            source: "fixture".to_string(),
+            value: FactValue::Decimal {
+                value: Decimal::from_str("100.00").expect("decimal"),
+            },
+        },
     )
     .await
     .expect("append fact");

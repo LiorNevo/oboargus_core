@@ -1,27 +1,27 @@
 //! Refresh orchestrator: drives per-asset price refreshes through the registry.
 //!
 //! Implements FR-007 / FR-013 / FR-014 / FR-030..FR-032 of
-//! `specs/017-yahoo-data-source/spec.md`. The orchestrator writes
-//! `AssetReferenceData` rows via the predecessor's `create_asset_reference_data`
-//! and persists a `data_source_refresh_runs` audit row per call.
+//! `specs/017-yahoo-data-source/spec.md`. The orchestrator writes typed market
+//! observations through the normalized fact surface and persists a
+//! `data_source_refresh_runs` audit row per call.
 
 use std::collections::HashMap;
 
-use chrono::{NaiveDate, Utc};
-use rust_decimal::Decimal;
+use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::domain::asset_identifier::read as asset_identifier_read;
-use crate::domain::asset_reference_data::create as asset_reference_data_create;
-use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
 use crate::domain::id::AssetId;
 use crate::domain::id::DomainId;
-use crate::domain::time_support::{now_micros, one_microsecond_after, utc_midnight};
 use crate::market_data::audit::{DataSourceRefreshCounters, finish_refresh_run, start_refresh_run};
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::registry::DataSourceRegistry;
-use crate::market_data::types::{LatestBarRequest, PriceBar, TypedIdentifier};
+use crate::market_data::types::{LatestBarRequest, TypedIdentifier};
+use crate::temporal::{
+    Adjustment, FactInput, FactSubject, FactValue, KnownAt, MarketPriceValue, ValidAt,
+    write_fact_outcome,
+};
 
 /// Input for `run_refresh`.
 ///
@@ -69,9 +69,8 @@ pub struct RefreshSummary {
 
 /// Fact type written by `run_refresh` for end-of-day OHLCV bars.
 ///
-/// Implements FR-013 of spec 017. The value is a canonical JSON object
-/// shaped `{ "open": "…", "high": "…", "low": "…", "close": "…",
-/// "adjclose": "…", "volume": <u64> }`.
+/// Implements FR-013 of spec 017. The value is a typed
+/// `MarketPriceValue` stored in `market_observations`.
 pub const FACT_TYPE_MARKET_PRICE: &str = "market_price";
 
 /// Drives a refresh run over the configured assets.
@@ -143,50 +142,34 @@ pub async fn run_refresh(
         };
 
         {
-            let value_payload =
-                serde_json::to_string(&serialize_bar(&latest.bar)).map_err(|e| {
-                    MarketDataProviderError::Infrastructure(format!("json encode: {e}"))
-                })?;
             *per_source_attempted
                 .entry(latest.source_id.clone())
                 .or_insert(0) += 1;
 
-            // Idempotency (FR-031 of spec 017, FR-010 of spec 021): a
-            // re-run that produces the SAME value for the same source is a
-            // no-op. A same-day correction with a different value is a
-            // revision and must be stored, so the comparison is on the
-            // payload - not on the calendar date.
-            let current =
-                current_belief(pool, asset_id, latest.bar.as_of_date, &latest.source_id).await;
-            if current
-                .as_ref()
-                .is_some_and(|(value, _)| value == &value_payload)
-            {
-                counters.no_op += 1;
-                continue;
-            }
-
-            let known_at = match current {
-                Some((_, winner)) if Utc::now() <= winner => one_microsecond_after(winner),
-                _ => now_micros(),
-            };
-
-            let new_row = NewAssetReferenceData {
-                asset_id,
+            let currency = asset_currency(pool, asset_id).await;
+            let value = FactValue::MarketPrice(MarketPriceValue {
+                open: latest.bar.open,
+                high: latest.bar.high,
+                low: latest.bar.low,
+                close: latest.bar.close,
+                adjclose: Some(latest.bar.adjclose),
+                volume: Some(rust_decimal::Decimal::from(latest.bar.volume)),
+                currency,
+                adjustment: Adjustment::Unadjusted,
+            });
+            let input = FactInput {
+                subject: FactSubject::Asset(asset_id),
                 fact_type: FACT_TYPE_MARKET_PRICE.to_string(),
-                as_of_date: latest.bar.as_of_date,
-                knowledge_date: known_at.date_naive(),
-                value: value_payload,
+                valid_at: ValidAt::midnight_utc(latest.bar.as_of_date),
+                known_at: KnownAt::now(),
                 source: latest.source_id.clone(),
+                value,
             };
-            match asset_reference_data_create::create_asset_reference_data_with_known_at(
-                pool, new_row, known_at,
-            )
-            .await
-            {
-                Ok(_) => counters.refreshed += 1,
+            match write_fact_outcome(pool, input).await {
+                Ok((_, true)) => counters.refreshed += 1,
+                Ok((_, false)) => counters.no_op += 1,
                 Err(e) => {
-                    tracing::warn!(asset_id = %asset_id, error = %e, "asset_reference_data write failed");
+                    tracing::warn!(asset_id = %asset_id, error = %e, "market observation write failed");
                     counters.source_unavailable += 1;
                     *per_source_failed.entry(latest.source_id).or_insert(0) += 1;
                 }
@@ -218,42 +201,15 @@ pub async fn run_refresh(
     })
 }
 
-/// The current belief for `(asset, market_price, valid day, source)`:
-/// its payload and its precise transaction time.
-///
-/// Implements FR-031 of spec 017 and FR-010 of spec 021.
-async fn current_belief(
-    pool: &sqlx::PgPool,
-    asset_id: AssetId,
-    as_of_date: NaiveDate,
-    source: &str,
-) -> Option<(String, chrono::DateTime<Utc>)> {
-    match sqlx::query_as::<_, (String, chrono::DateTime<Utc>)>(
-        r#"
-        SELECT value, known_at
-        FROM asset_reference_data
-        WHERE asset_id = $1 AND fact_type = $2 AND valid_at = $3 AND source = $4
-          AND NOT retracted
-        ORDER BY known_at DESC, id DESC LIMIT 1
-        "#,
-    )
-    .bind(asset_id.as_uuid())
-    .bind(FACT_TYPE_MARKET_PRICE)
-    .bind(utc_midnight(as_of_date))
-    .bind(source)
-    .fetch_optional(pool)
-    .await
-    {
-        Ok(row) => row,
-        Err(error) => {
-            tracing::warn!(
-                asset_id = %asset_id,
-                error = %error,
-                "could not read the current reference-data row; assuming the fact is new"
-            );
-            None
-        }
-    }
+/// Reads the asset's reporting currency, defaulting to USD for a legacy row.
+async fn asset_currency(pool: &sqlx::PgPool, asset_id: AssetId) -> String {
+    let currency: Option<String> = sqlx::query_scalar("SELECT currency FROM assets WHERE id = $1")
+        .bind(asset_id.as_uuid())
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+    currency.unwrap_or_else(|| "USD".to_string())
 }
 
 /// Picks the first identifier whose scheme is supported by at least one
@@ -313,60 +269,9 @@ async fn scan_assets_with_supported_identifier(
         .collect())
 }
 
-/// Serializes a `PriceBar` as canonical JSON suitable for the
-/// `AssetReferenceData.value` payload.
-///
-/// The shape is `{ "open": "…", "high": "…", "low": "…", "close": "…",
-/// "adjclose": "…", "volume": <u64> }` — prices are decimal *strings* so
-/// no precision is lost through a JSON number round-trip (Constitution
-/// Principle X).
-///
-/// Implements FR-013 of spec 017.
-pub fn serialize_bar(bar: &PriceBar) -> serde_json::Value {
-    json!({
-        "open": decimal_to_string(bar.open),
-        "high": decimal_to_string(bar.high),
-        "low": decimal_to_string(bar.low),
-        "close": decimal_to_string(bar.close),
-        "adjclose": decimal_to_string(bar.adjclose),
-        "volume": bar.volume,
-    })
-}
-
-fn decimal_to_string(d: Decimal) -> String {
-    d.normalize().to_string()
-}
-
-/// Returns today's date (used by tests that pin the clock).
-///
-/// Implements FR-014 of spec 017 (the dual-temporal `knowledge_date`).
-#[allow(dead_code)]
-pub fn today() -> NaiveDate {
-    Utc::now().date_naive()
-}
-
-#[allow(unused_imports)]
-use crate::domain::asset_reference_data::entity::AssetReferenceData as _AssetReferenceData;
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn serialize_bar_emits_all_six_fields() {
-        let bar = PriceBar {
-            as_of_date: NaiveDate::from_ymd_opt(2026, 1, 2).unwrap(),
-            open: Decimal::new(100, 0),
-            high: Decimal::new(101, 0),
-            low: Decimal::new(99, 0),
-            close: Decimal::new(100, 0),
-            adjclose: Decimal::new(100, 0),
-            volume: 1_234_567,
-        };
-        let v = serialize_bar(&bar);
-        assert_eq!(v["volume"], 1_234_567i64);
-        assert!(v["close"].is_string());
-    }
 
     #[test]
     fn scheme_matches_handles_wildcards() {
@@ -434,12 +339,5 @@ mod tests {
         let config = RefreshConfig::cli_all();
         assert!(config.assets.is_none(), "cli_all must not pin a list");
         assert_eq!(config.trigger, "cli");
-    }
-
-    /// `today()` is the dual-temporal `knowledge_date` used by the refresh
-    /// run (FR-014).
-    #[test]
-    fn today_is_the_current_utc_date() {
-        assert_eq!(today(), Utc::now().date_naive());
     }
 }

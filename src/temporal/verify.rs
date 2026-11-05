@@ -1,21 +1,22 @@
-//! Operator-facing integrity checks for the bitemporal model.
+//! Operator-facing integrity checks for the normalized fact model.
 //!
-//! `verify_parity` proves the legacy `domain::get_current_*` readers and the
-//! new temporal readers agree on migrated data. `verify_lookahead` proves an
-//! as-known read never returns a belief recorded after its `known_at`.
+//! `verify_parity` proves every non-retracted envelope has its typed payload
+//! and every observation has a valid market-price payload. `verify_lookahead`
+//! proves an as-known read never returns a belief recorded after its
+//! `known_at`.
 //!
 //! Both are read-only and safe to run against production.
 
 use chrono::NaiveDate;
-use sqlx::{AssertSqlSafe, PgPool};
+use sqlx::{AssertSqlSafe, FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::domain::id::{AssetId, DomainId, IssuerId, PortfolioId};
-
-use super::FactSubject;
-use super::error::TemporalError;
-use super::facts::read::{fact_as_known, fact_at};
-use super::instant::{KnownAt, ValidAt};
+use crate::temporal::catalog::{StorageKind, fact_type};
+use crate::temporal::error::TemporalError;
+use crate::temporal::facts::FactSubject;
+use crate::temporal::facts::read::fact_as_known;
+use crate::temporal::facts::value::FactValue;
+use crate::temporal::instant::{KnownAt, ValidAt};
 
 /// The result of a verification run. An empty `failures` list means the
 /// invariant holds.
@@ -34,36 +35,36 @@ impl VerificationReport {
     }
 }
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, FromRow)]
 struct StoredFact {
-    kind: String,
+    id: Uuid,
+    subject_kind: String,
     subject_id: Uuid,
     fact_type: String,
     valid_at: chrono::DateTime<chrono::Utc>,
     known_at: chrono::DateTime<chrono::Utc>,
+    retracted: bool,
 }
 
-const ALL_FACTS: &str = "SELECT 'asset' AS kind, asset_id AS subject_id, fact_type, valid_at, known_at \
-     FROM asset_reference_data UNION ALL \
-     SELECT 'issuer', issuer_id, fact_type, valid_at, known_at FROM issuer_reference_data UNION ALL \
-     SELECT 'portfolio', portfolio_id, fact_type, valid_at, known_at FROM portfolio_reference_data";
+const FACT_ROWS: &str = "SELECT id, subject_kind, subject_id, fact_type, valid_at, \
+     known_at, retracted FROM temporal_facts";
 
 fn subject(kind: &str, id: Uuid) -> Result<FactSubject, TemporalError> {
     FactSubject::from_parts(kind, id)
 }
 
-/// Asserts that the legacy and temporal current-value readers agree.
+/// Asserts every non-retracted fact has its typed payload and every stored
+/// observation converts to a market-price value.
 ///
-/// Implements T026 of `specs/021-bitemporal-market-data/tasks.md` and FR-044.
+/// Implements the parity check of `specs/027-normalized-fact-model/spec.md`.
 pub async fn verify_parity(
     pool: &PgPool,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
 ) -> Result<VerificationReport, TemporalError> {
     let rows: Vec<StoredFact> = sqlx::query_as(AssertSqlSafe(format!(
-        "SELECT DISTINCT ON (kind, subject_id, fact_type, valid_at) * FROM ({ALL_FACTS}) AS f \
-         WHERE ($1::date IS NULL OR valid_at >= $1) AND ($2::date IS NULL OR valid_at < $2) \
-         ORDER BY kind, subject_id, fact_type, valid_at"
+        "{FACT_ROWS} WHERE ($1::date IS NULL OR valid_at >= $1) \
+         AND ($2::date IS NULL OR valid_at < $2) ORDER BY valid_at"
     )))
     .bind(from)
     .bind(to)
@@ -73,84 +74,55 @@ pub async fn verify_parity(
     let mut report = VerificationReport::default();
     for row in rows {
         report.checks += 1;
-        let fact_subject = subject(&row.kind, row.subject_id)?;
-        let valid_at = ValidAt::new(row.valid_at)?;
-
-        let temporal = fact_at(pool, fact_subject, &row.fact_type, valid_at).await?;
-        let legacy = legacy_current(
-            pool,
-            fact_subject,
-            &row.fact_type,
-            row.valid_at.date_naive(),
-        )
-        .await?;
-
-        match (temporal, legacy) {
-            (Some(temporal), Some(legacy)) => {
-                if temporal.value != legacy {
-                    report.failures.push(format!(
-                        "{} {} {} at {}: temporal={:?} legacy={:?}",
-                        row.kind,
-                        row.subject_id,
-                        row.fact_type,
-                        row.valid_at,
-                        temporal.value,
-                        legacy
-                    ));
-                }
-            }
-            (Some(temporal), None) => report.failures.push(format!(
-                "{} {} {} at {}: temporal has {:?}, legacy has no row",
-                row.kind, row.subject_id, row.fact_type, row.valid_at, temporal.value
-            )),
-            // A retracted winner is expected to have no temporal value; the
-            // legacy reader simply returns the previous belief, which is the
-            // documented pre-021 behaviour.
-            (None, _) => {}
+        if row.retracted {
+            continue;
+        }
+        let def = fact_type(&row.fact_type).ok_or_else(|| TemporalError::UnknownFactType {
+            fact_type: row.fact_type.clone(),
+        })?;
+        let present = payload_present(pool, row.id, def.storage_kind).await?;
+        if !present {
+            report.failures.push(format!(
+                "{} {} {} at {}: envelope has no typed payload",
+                row.subject_kind, row.subject_id, row.fact_type, row.valid_at
+            ));
         }
     }
+
+    let observations: Vec<(
+        Uuid,
+        Option<rust_decimal::Decimal>,
+        Option<rust_decimal::Decimal>,
+    )> = sqlx::query_as("SELECT id, close, price FROM market_observations WHERE NOT retracted")
+        .fetch_all(pool)
+        .await?;
+    for (id, close, price) in observations {
+        report.checks += 1;
+        if close.is_none() && price.is_none() {
+            report.failures.push(format!(
+                "observation {id}: non-retracted row has neither close nor price"
+            ));
+        }
+    }
+
     Ok(report)
 }
 
-/// Reads the legacy current value for one subject, as an `Option<String>`.
-async fn legacy_current(
+async fn payload_present(
     pool: &PgPool,
-    subject: FactSubject,
-    fact_type: &str,
-    as_of_date: NaiveDate,
-) -> Result<Option<String>, TemporalError> {
-    match subject {
-        FactSubject::Asset(id) => Ok(
-            crate::domain::asset_reference_data::read::get_current_asset_reference_data(
-                pool,
-                AssetId::from_uuid(id.as_uuid()),
-                fact_type,
-                as_of_date,
-            )
-            .await?
-            .map(|row| row.value),
-        ),
-        FactSubject::Issuer(id) => Ok(
-            crate::domain::issuer_reference_data::read::get_current_issuer_reference_data(
-                pool,
-                IssuerId::from_uuid(id.as_uuid()),
-                fact_type,
-                as_of_date,
-            )
-            .await?
-            .map(|row| row.value),
-        ),
-        FactSubject::Portfolio(id) => Ok(
-            crate::domain::portfolio_reference_data::read::get_current_portfolio_reference_data(
-                pool,
-                PortfolioId::from_uuid(id.as_uuid()),
-                fact_type,
-                as_of_date,
-            )
-            .await?
-            .map(|row| row.value),
-        ),
-    }
+    fact_id: Uuid,
+    storage: StorageKind,
+) -> Result<bool, TemporalError> {
+    let table = match storage.payload_table() {
+        Some(table) => table,
+        None => return Ok(false),
+    };
+    let query = format!("SELECT EXISTS (SELECT 1 FROM {table} WHERE fact_id = $1)");
+    let exists: bool = sqlx::query_scalar(AssertSqlSafe(query))
+        .bind(fact_id)
+        .fetch_one(pool)
+        .await?;
+    Ok(exists)
 }
 
 /// Samples recorded beliefs and asserts no as-known read returns a belief
@@ -164,7 +136,7 @@ pub async fn verify_lookahead(
 ) -> Result<VerificationReport, TemporalError> {
     let limit = i64::try_from(samples.max(1)).unwrap_or(i64::MAX);
     let rows: Vec<StoredFact> = sqlx::query_as(AssertSqlSafe(format!(
-        "SELECT * FROM ({ALL_FACTS}) AS f ORDER BY random() LIMIT $1"
+        "{FACT_ROWS} ORDER BY random() LIMIT $1"
     )))
     .bind(limit)
     .fetch_all(pool)
@@ -173,7 +145,7 @@ pub async fn verify_lookahead(
     let mut report = VerificationReport::default();
     for row in rows {
         report.checks += 1;
-        let fact_subject = subject(&row.kind, row.subject_id)?;
+        let fact_subject = subject(&row.subject_kind, row.subject_id)?;
         let known_at = KnownAt::new(row.known_at)?;
         let read = fact_as_known(
             pool,
@@ -189,11 +161,22 @@ pub async fn verify_lookahead(
         {
             report.failures.push(format!(
                 "{} {} {} at {}: as-known {} returned a belief recorded at {}",
-                row.kind, row.subject_id, row.fact_type, row.valid_at, row.known_at, point.known_at
+                row.subject_kind,
+                row.subject_id,
+                row.fact_type,
+                row.valid_at,
+                row.known_at,
+                point.known_at
             ));
         }
     }
     Ok(report)
+}
+
+/// Converts a market observation into the typed value used by parity checks.
+#[allow(dead_code)]
+fn observation_value(close: Option<rust_decimal::Decimal>) -> Option<FactValue> {
+    close.map(|value| FactValue::Decimal { value })
 }
 
 #[cfg(test)]

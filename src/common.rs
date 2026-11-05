@@ -39,20 +39,26 @@ use sqlx::PgPool;
 
 /// All high-level tables, in dependency order.
 const TABLES: &[&str] = &[
-    "asset_reference_data",
-    "issuer_reference_data",
-    "portfolio_reference_data",
+    "fact_text_values",
+    "fact_decimal_values",
+    "fact_integer_values",
+    "fact_boolean_values",
+    "fact_date_values",
+    "fact_timestamp_values",
+    "temporal_facts",
+    "market_observations",
+    "fact_reconciliations",
+    "data_source_fact_types",
     "asset_identifiers",
     "issuer_identifiers",
     "rules",
     "portfolio_rules",
     "positions",
     "events",
-    // Market-data audit tables. `data_source_reconciliation_audits`
-    // references `assets`, so it is truncated before `assets` (the
+    // Market-data audit tables. `fact_reconciliations` references
+    // `temporal_facts`, so it is truncated before the fact envelope (the
     // `CASCADE` would handle the order either way, but keeping the
     // dependency order explicit makes the list readable).
-    "data_source_reconciliation_audits",
     "data_source_refresh_runs",
     "data_source_state_changes",
     "reference_data_load_runs",
@@ -98,6 +104,9 @@ pub async fn tx_pool_from(
         .run(&pool)
         .await
         .expect("migrations");
+    crate::temporal::catalog::sync_fact_catalog(&pool)
+        .await
+        .expect("fact catalog");
     cleanup(&pool).await;
     let pool_clone = pool.clone();
     Some((pool, PoolGuard { pool: pool_clone }))
@@ -235,17 +244,30 @@ pub async fn seed_temporal_fixture(pool: &PgPool) {
         ),
     ] {
         sqlx::query(
-            "INSERT INTO asset_reference_data \
-                (id, asset_id, fact_type, valid_at, known_at, value, source, retracted) \
-             VALUES ($1, $2, 'market_price', '2026-01-02T00:00:00Z', $3::timestamptz, $4, 'fixture', $5)",
+            "INSERT INTO temporal_facts \
+                (id, asset_id, fact_type, valid_at, known_at, source, retracted, \
+                 retraction_reason, content_hash) \
+             VALUES ($1, $2, 'nav', '2026-01-02T00:00:00Z', $3::timestamptz, 'fixture', $4, $5, $6)",
         )
         .bind(id)
         .bind(temporal_ids::ASSET)
         .bind(known_at)
-        .bind(value)
         .bind(retracted)
+        .bind(if retracted { Some(value) } else { None })
+        .bind(format!("fixture-{id}"))
         .execute(pool)
         .await
         .expect("seed fact");
+
+        if !retracted {
+            sqlx::query(
+                "INSERT INTO fact_decimal_values (fact_id, value) VALUES ($1, $2::numeric)",
+            )
+            .bind(id)
+            .bind(value)
+            .execute(pool)
+            .await
+            .expect("seed fact value");
+        }
     }
 }

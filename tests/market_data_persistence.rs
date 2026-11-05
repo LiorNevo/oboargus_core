@@ -3,7 +3,7 @@
 //! Implements the executable proof of the persistence half of spec 017
 //! (FR-002, FR-007, FR-022, FR-030..FR-032): the `data_sources`
 //! configuration table, the `data_source_refresh_runs` audit table, the
-//! `data_source_reconciliation_audits` audit table, and the two
+//! `fact_reconciliations` audit table, and the two
 //! orchestrators (`run_refresh` / `run_reconcile`) that write them.
 //!
 //! These paths are database-bound, so the crate's own coverage run never
@@ -367,7 +367,7 @@ async fn finish_refresh_run_writes_the_counters() {
 }
 
 // ---------------------------------------------------------------------------
-// data_source_reconciliation_audits: the reconciliation audit table (FR-022)
+// fact_reconciliations: the reconciliation audit table (FR-019/FR-022)
 // ---------------------------------------------------------------------------
 
 /// A reconciliation audit requires at least two consulted sources.
@@ -381,13 +381,19 @@ async fn record_reconciliation_audit_requires_two_sources() {
     let error = record_reconciliation_audit(
         &pool,
         ReconciliationAuditPayload {
-            asset_id,
+            subject_kind: "asset".to_string(),
+            subject_id: asset_id.as_uuid(),
             fact_type: "market_price".to_string(),
-            as_of_date: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+            valid_at: NaiveDate::from_ymd_opt(2026, 1, 2)
+                .expect("date")
+                .and_hms_opt(0, 0, 0)
+                .expect("midnight")
+                .and_utc(),
+            chosen_fact_id: None,
+            chosen_observation_id: None,
             policy: "primary_wins".to_string(),
             sources_tried: vec!["only_one".to_string()],
             per_source_answers: serde_json::json!({}),
-            canonical_value: "{}".to_string(),
         },
     )
     .await
@@ -413,13 +419,19 @@ async fn record_reconciliation_audit_persists_the_row() {
     let row = record_reconciliation_audit(
         &pool,
         ReconciliationAuditPayload {
-            asset_id,
+            subject_kind: "asset".to_string(),
+            subject_id: asset_id.as_uuid(),
             fact_type: "market_price".to_string(),
-            as_of_date: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+            valid_at: NaiveDate::from_ymd_opt(2026, 1, 2)
+                .expect("date")
+                .and_hms_opt(0, 0, 0)
+                .expect("midnight")
+                .and_utc(),
+            chosen_fact_id: None,
+            chosen_observation_id: None,
             policy: "first_non_empty".to_string(),
             sources_tried: vec!["a".to_string(), "b".to_string()],
             per_source_answers: answers.clone(),
-            canonical_value: "{\"close\":\"100\"}".to_string(),
         },
     )
     .await
@@ -429,7 +441,8 @@ async fn record_reconciliation_audit_persists_the_row() {
     assert_eq!(row.sources_tried, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(row.policy, "first_non_empty");
     assert_eq!(row.per_source_answers, answers);
-    assert_eq!(row.canonical_value, "{\"close\":\"100\"}");
+    assert_eq!(row.subject_kind, "asset");
+    assert_eq!(row.subject_id, asset_id.as_uuid());
 
     guard.cleanup().await;
 }
@@ -482,26 +495,24 @@ async fn run_refresh_writes_the_price_fact() {
     assert_eq!(refreshed, 1);
     assert!(ended, "the run must be closed");
 
-    // The canonical fact was written to `asset_reference_data`.
-    let fact: Option<(String,)> = sqlx::query_as(
-        "SELECT value FROM asset_reference_data \
-         WHERE asset_id = $1 AND fact_type = 'market_price'",
+    // The canonical fact was written to `market_observations`.
+    let fact: Option<(rust_decimal::Decimal, rust_decimal::Decimal)> = sqlx::query_as(
+        "SELECT close, volume FROM market_observations \
+         WHERE asset_id = $1 AND kind = 'eod' AND interval_seconds = 0",
     )
     .bind(asset_id.as_uuid())
     .fetch_optional(&pool)
     .await
     .expect("query fact");
-    let (value,) = fact.expect("the price fact was written");
-    let parsed: serde_json::Value = serde_json::from_str(&value).expect("json");
-    assert_eq!(parsed["close"], "100");
-    assert_eq!(parsed["volume"], 1_000_000i64);
+    let (close, volume) = fact.expect("the price fact was written");
+    assert_eq!(close, rust_decimal::Decimal::from(100));
+    assert_eq!(volume, rust_decimal::Decimal::from(1_000_000));
 
     guard.cleanup().await;
 }
 
 /// Re-running the refresh for the same fact is a no-op (FR-031): the
-/// predecessor's table is unique on
-/// `(asset_id, fact_type, as_of_date, knowledge_date)`.
+/// observation identity includes the canonical content hash.
 #[tokio::test]
 async fn run_refresh_is_idempotent_for_the_same_fact() {
     let Some((pool, guard)) = tx_pool().await else {
@@ -729,8 +740,7 @@ async fn run_reconcile_writes_the_canonical_value_and_the_audit_row() {
     .expect("reconcile");
 
     // The primary (lowest priority = last in walking order) wins.
-    let parsed: serde_json::Value = serde_json::from_str(&summary.canonical_value).expect("json");
-    assert_eq!(parsed["close"], "200");
+    assert_eq!(summary.canonical_value["close"], "200");
 
     let per_source: &BTreeMap<String, _> = &summary.per_source_answers;
     assert_eq!(per_source.len(), 2);
@@ -740,7 +750,7 @@ async fn run_reconcile_writes_the_canonical_value_and_the_audit_row() {
     // The audit row is persisted.
     let audit: Option<(String, i32)> = sqlx::query_as(
         "SELECT policy, cardinality(sources_tried) \
-         FROM data_source_reconciliation_audits WHERE id = $1",
+         FROM fact_reconciliations WHERE id = $1",
     )
     .bind(summary.reconciliation_id)
     .fetch_optional(&pool)
@@ -781,8 +791,7 @@ async fn run_reconcile_first_non_empty_picks_the_first_answer() {
     .await
     .expect("reconcile");
 
-    let parsed: serde_json::Value = serde_json::from_str(&summary.canonical_value).expect("json");
-    assert_eq!(parsed["close"], "100");
+    assert_eq!(summary.canonical_value["close"], "100");
 
     guard.cleanup().await;
 }
@@ -816,17 +825,15 @@ async fn run_reconcile_survives_one_failing_source() {
     .await
     .expect("reconcile");
 
-    let parsed: serde_json::Value = serde_json::from_str(&summary.canonical_value).expect("json");
-    assert_eq!(parsed["close"], "200");
+    assert_eq!(summary.canonical_value["close"], "200");
 
     // The failed source is recorded as an error in the audit map.
-    let answers: Option<(serde_json::Value,)> = sqlx::query_as(
-        "SELECT per_source_answers FROM data_source_reconciliation_audits WHERE id = $1",
-    )
-    .bind(summary.reconciliation_id)
-    .fetch_optional(&pool)
-    .await
-    .expect("query audit");
+    let answers: Option<(serde_json::Value,)> =
+        sqlx::query_as("SELECT per_source_answers FROM fact_reconciliations WHERE id = $1")
+            .bind(summary.reconciliation_id)
+            .fetch_optional(&pool)
+            .await
+            .expect("query audit");
     let (answers,) = answers.expect("the audit row was written");
     assert!(
         answers["a"].get("error").is_some(),
@@ -903,8 +910,7 @@ async fn run_reconcile_asks_about_the_asset_identifier() {
     .expect("reconcile");
 
     // The canonical value names the asset's own bar.
-    let parsed: serde_json::Value = serde_json::from_str(&summary.canonical_value).expect("json");
-    assert_eq!(parsed["close"], "200");
+    assert_eq!(summary.canonical_value["close"], "200");
 
     guard.cleanup().await;
 }

@@ -91,6 +91,31 @@ pub async fn upsert_data_source(
     .await
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("upsert_data_source: {e}")))?;
 
+    sqlx::query(
+        "DELETE FROM data_source_fact_types WHERE source_id = $1 \
+         AND NOT (fact_type = ANY($2))",
+    )
+    .bind(&config.source_id)
+    .bind(&config.supported_fact_types)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        MarketDataProviderError::Infrastructure(format!("upsert_data_source capabilities: {e}"))
+    })?;
+    for fact_type in &config.supported_fact_types {
+        sqlx::query(
+            "INSERT INTO data_source_fact_types (source_id, fact_type) VALUES ($1, $2) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(&config.source_id)
+        .bind(fact_type)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            MarketDataProviderError::Infrastructure(format!("upsert_data_source capability: {e}"))
+        })?;
+    }
+
     Ok(row)
 }
 

@@ -75,6 +75,36 @@ pub enum TemporalError {
         detail: String,
     },
 
+    /// The fact type is not registered in the catalog.
+    #[error("unknown fact type: {fact_type}")]
+    UnknownFactType {
+        /// The requested fact type.
+        fact_type: String,
+    },
+
+    /// The fact type is not defined for the requested subject kind.
+    #[error("invalid subject: {subject}")]
+    InvalidSubject {
+        /// What was requested and why it is invalid.
+        subject: String,
+    },
+
+    /// The value does not match the fact type's declared shape or constraints.
+    #[error("invalid value for {fact_type}: {detail}")]
+    InvalidFactValue {
+        /// The fact type.
+        fact_type: String,
+        /// What failed.
+        detail: String,
+    },
+
+    /// A fact envelope exists without its required typed payload.
+    #[error("missing payload for fact {fact_id}")]
+    MissingPayload {
+        /// The envelope id.
+        fact_id: uuid::Uuid,
+    },
+
     /// Infrastructure failure; never swallowed.
     #[error("infrastructure: {0}")]
     Infrastructure(#[from] sqlx::Error),

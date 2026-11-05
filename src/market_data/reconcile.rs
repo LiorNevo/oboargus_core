@@ -3,9 +3,8 @@
 //! Implements FR-020 / FR-021 / FR-022 of `specs/017-yahoo-data-source/spec.md`.
 //! `run_reconcile` queries every enabled source for one
 //! `(asset, fact_type, as_of_date)` triple, applies a `ReconciliationPolicy`,
-//! writes the chosen canonical value via the predecessor's
-//! `create_asset_reference_data`, and persists a
-//! `data_source_reconciliation_audits` audit row.
+//! writes the chosen canonical value through the typed fact surface, and
+//! persists a `fact_reconciliations` audit row.
 
 use std::collections::BTreeMap;
 
@@ -15,14 +14,16 @@ use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::domain::asset_identifier::read as asset_identifier_read;
-use crate::domain::asset_reference_data::create as asset_reference_data_create;
-use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
 use crate::domain::id::AssetId;
 use crate::domain::id::DomainId;
 use crate::market_data::audit::{ReconciliationAuditPayload, record_reconciliation_audit};
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::registry::DataSourceRegistry;
 use crate::market_data::types::{LatestBar, LatestBarRequest, TypedIdentifier};
+use crate::temporal::{
+    Adjustment, FactInput, FactSubject, FactValue, KnownAt, MarketPriceValue, ValidAt,
+    write_fact_outcome,
+};
 
 /// Reconciliation policy. `Majority` is named in the spec but deferred to a
 /// follow-on (research D9); v1 ships `FirstNonEmpty` + `PrimaryWins`.
@@ -62,9 +63,8 @@ pub struct ReconcileSummary {
     pub reconciliation_id: Uuid,
     /// Per-source map (`source_id` -> outcome).
     pub per_source_answers: BTreeMap<String, ReconcileEntry>,
-    /// The chosen canonical value, as the serialized form already
-    /// persisted as the `AssetReferenceData.value`.
-    pub canonical_value: String,
+    /// The chosen canonical value, projected as typed JSON for the caller.
+    pub canonical_value: serde_json::Value,
 }
 
 /// Per-source entry in the reconciliation audit map.
@@ -153,8 +153,7 @@ fn apply_policy(
 }
 
 /// Reconcile one fact across all enabled sources. Persists the canonical
-/// value as a new `AssetReferenceData` row (with `knowledge_date = today()`)
-/// and the audit row.
+/// value as a typed observation and the audit row.
 ///
 /// Implements FR-020..FR-022 of spec 017.
 pub async fn run_reconcile(
@@ -204,34 +203,39 @@ pub async fn run_reconcile(
         }
     };
 
-    // Serialize the chosen bar as JSON for `AssetReferenceData.value`.
-    let value_json = serde_json::to_string(&serde_json::json!({
-        "open": chosen.bar.open.to_string(),
-        "high": chosen.bar.high.to_string(),
-        "low": chosen.bar.low.to_string(),
-        "close": chosen.bar.close.to_string(),
-        "adjclose": chosen.bar.adjclose.to_string(),
-        "volume": chosen.bar.volume,
-    }))
-    .map_err(|e| MarketDataProviderError::Infrastructure(format!("json: {e}")))?;
-
-    let knowledge_date = Utc::now().date_naive();
-
-    asset_reference_data_create::create_asset_reference_data(
+    let currency = crate::domain::asset::read::get_asset(pool, config.asset_id)
+        .await
+        .map(|asset| asset.currency)
+        .unwrap_or_else(|_| "USD".to_string());
+    let value = FactValue::MarketPrice(MarketPriceValue {
+        open: chosen.bar.open,
+        high: chosen.bar.high,
+        low: chosen.bar.low,
+        close: chosen.bar.close,
+        adjclose: Some(chosen.bar.adjclose),
+        volume: Some(rust_decimal::Decimal::from(chosen.bar.volume)),
+        currency,
+        adjustment: Adjustment::Unadjusted,
+    });
+    let (point, _) = write_fact_outcome(
         pool,
-        NewAssetReferenceData {
-            asset_id: config.asset_id,
+        FactInput {
+            subject: FactSubject::Asset(config.asset_id),
             fact_type: config.fact_type.clone(),
-            as_of_date: config.as_of_date,
-            knowledge_date,
-            value: value_json.clone(),
+            valid_at: ValidAt::midnight_utc(config.as_of_date),
+            known_at: KnownAt::now(),
             source: chosen.source_id.clone(),
+            value,
         },
     )
     .await
-    .map_err(|e| {
-        MarketDataProviderError::Infrastructure(format!("create_asset_reference_data: {e}"))
-    })?;
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("write_fact: {e}")))?;
+
+    let canonical_value = point
+        .value
+        .as_ref()
+        .and_then(|value| serde_json::to_value(value).ok())
+        .unwrap_or(serde_json::Value::Null);
 
     let per_source_answers = serde_json::Value::Object(json_map.clone());
     let policy_label = match config.policy {
@@ -242,13 +246,15 @@ pub async fn run_reconcile(
     let audit = record_reconciliation_audit(
         pool,
         ReconciliationAuditPayload {
-            asset_id: config.asset_id,
+            subject_kind: "asset".to_string(),
+            subject_id: config.asset_id.as_uuid(),
             fact_type: config.fact_type.clone(),
-            as_of_date: config.as_of_date,
+            valid_at: ValidAt::midnight_utc(config.as_of_date).as_datetime(),
+            chosen_fact_id: None,
+            chosen_observation_id: Some(point.id),
             policy: policy_label.to_string(),
             sources_tried,
             per_source_answers,
-            canonical_value: value_json.clone(),
         },
     )
     .await?;
@@ -268,7 +274,7 @@ pub async fn run_reconcile(
     Ok(ReconcileSummary {
         reconciliation_id: audit.id,
         per_source_answers: out,
-        canonical_value: value_json,
+        canonical_value,
     })
 }
 

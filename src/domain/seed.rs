@@ -10,8 +10,6 @@ use sqlx::PgPool;
 
 use crate::domain::asset::create as asset_create;
 use crate::domain::asset::entity::{AssetFilter, NewAsset};
-use crate::domain::asset_reference_data::create as asset_ref_create;
-use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
 use crate::domain::error::DomainError;
 use crate::domain::event::create as event_create;
 use crate::domain::event::entity::NewEvent;
@@ -215,19 +213,23 @@ pub async fn seed_canonical_dataset(pool: &PgPool) -> Result<SeedSummary, Domain
     .await?;
     summary.events_created += 1;
 
-    // A handful of reference-data records
-    asset_ref_create::create_asset_reference_data(
+    // A typed reference fact (the normalized replacement for the old
+    // `value TEXT` record).
+    crate::temporal::write_fact(
         pool,
-        NewAssetReferenceData {
-            asset_id: aapl.id(),
-            fact_type: "market_price".to_string(),
-            as_of_date: today,
-            knowledge_date: today,
-            value: "175.50".to_string(),
+        crate::temporal::FactInput {
+            subject: crate::temporal::FactSubject::Asset(aapl.id()),
+            fact_type: "name".to_string(),
+            valid_at: crate::temporal::ValidAt::midnight_utc(today),
+            known_at: crate::temporal::KnownAt::now(),
             source: "manual".to_string(),
+            value: crate::temporal::FactValue::Text {
+                value: "Apple Inc.".to_string(),
+            },
         },
     )
-    .await?;
+    .await
+    .map_err(|error| DomainError::Validation(error.to_string()))?;
     summary.reference_data_records_created += 1;
 
     // External identifiers (US8, 2026-10-18): human-readable, like the rest

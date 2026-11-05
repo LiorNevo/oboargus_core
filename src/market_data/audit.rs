@@ -2,8 +2,8 @@
 //!
 //! Implements FR-007 / FR-022 / FR-032 of `specs/017-yahoo-data-source/spec.md`.
 //! The two audit tables are `data_source_refresh_runs` and
-//! `data_source_reconciliation_audits` (defined in
-//! `obolargus_core/migrations/0005_market_data_sources.sql`).
+//! `fact_reconciliations` (defined in
+//! `obolargus_core/migrations/0011_normalized_facts.sql`).
 
 use std::collections::BTreeSet;
 
@@ -96,27 +96,31 @@ impl DataSourceRefreshCounters {
     }
 }
 
-/// One row in `data_source_reconciliation_audits`.
+/// One row in `fact_reconciliations`.
 ///
-/// Implements FR-022 of spec 017.
+/// Implements FR-019 of `specs/027-normalized-fact-model/spec.md`.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow, Serialize, Deserialize)]
 pub struct ReconciliationAuditRow {
     /// Row id.
     pub id: Uuid,
-    /// Subject asset.
-    pub asset_id: Uuid,
+    /// Subject kind (`asset`, `issuer`, `portfolio`).
+    pub subject_kind: String,
+    /// Subject id.
+    pub subject_id: Uuid,
     /// Fact type (e.g. `"market_price"`).
     pub fact_type: String,
-    /// Dual-temporal `as_of_date`.
-    pub as_of_date: NaiveDate,
+    /// Valid instant the reconciliation applies to.
+    pub valid_at: DateTime<Utc>,
+    /// The chosen reference fact, when the fact is not an observation.
+    pub chosen_fact_id: Option<Uuid>,
+    /// The chosen observation, when the fact is an observation.
+    pub chosen_observation_id: Option<Uuid>,
     /// `"primary_wins"` or `"first_non_empty"` (v1; `"majority"` deferred).
     pub policy: String,
     /// Ordered list of source ids.
     pub sources_tried: Vec<String>,
     /// Per-source answers or typed errors.
     pub per_source_answers: serde_json::Value,
-    /// The chosen canonical value, as its serialized form.
-    pub canonical_value: String,
     /// Audit timestamp.
     pub decided_at: DateTime<Utc>,
 }
@@ -133,7 +137,7 @@ impl ReconciliationAuditRow {
     ///
     /// Implements FR-022 of spec 017.
     pub fn asset_id(&self) -> AssetId {
-        AssetId::from_uuid(self.asset_id)
+        AssetId::from_uuid(self.subject_id)
     }
 }
 
@@ -558,26 +562,33 @@ pub async fn get_load_run(
 /// Bundles the audited fields so the write helper keeps a small argument
 /// list. Implements FR-022 of spec 017.
 #[derive(Debug, Clone)]
+/// Payload for recording a reconciliation audit row.
+///
+/// Implements FR-019 of `specs/027-normalized-fact-model/spec.md`.
 pub struct ReconciliationAuditPayload {
-    /// Subject asset.
-    pub asset_id: AssetId,
+    /// Subject kind.
+    pub subject_kind: String,
+    /// Subject id.
+    pub subject_id: Uuid,
     /// Fact type (e.g. `"market_price"`).
     pub fact_type: String,
-    /// Dual-temporal `as_of_date`.
-    pub as_of_date: NaiveDate,
+    /// Valid instant.
+    pub valid_at: DateTime<Utc>,
+    /// Chosen reference fact id, if any.
+    pub chosen_fact_id: Option<Uuid>,
+    /// Chosen observation id, if any.
+    pub chosen_observation_id: Option<Uuid>,
     /// Policy label (`"primary_wins"`, `"first_non_empty"`).
     pub policy: String,
     /// Ordered list of source ids that were consulted.
     pub sources_tried: Vec<String>,
     /// Per-source answers or typed errors.
     pub per_source_answers: serde_json::Value,
-    /// The chosen canonical value, as its serialized form.
-    pub canonical_value: String,
 }
 
 /// Persists a reconciliation audit row.
 ///
-/// Implements FR-022 of spec 017.
+/// Implements FR-019 of `specs/027-normalized-fact-model/spec.md`.
 pub async fn record_reconciliation_audit(
     pool: &sqlx::PgPool,
     payload: ReconciliationAuditPayload,
@@ -589,29 +600,37 @@ pub async fn record_reconciliation_audit(
     }
     let id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO data_source_reconciliation_audits \
-         (id, asset_id, fact_type, as_of_date, policy, sources_tried, per_source_answers, canonical_value, decided_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())",
+        "INSERT INTO fact_reconciliations \
+         (id, subject_kind, subject_id, fact_type, valid_at, chosen_fact_id, \
+          chosen_observation_id, policy, sources_tried, per_source_answers, decided_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())",
     )
     .bind(id)
-    .bind(payload.asset_id.as_uuid())
+    .bind(&payload.subject_kind)
+    .bind(payload.subject_id)
     .bind(&payload.fact_type)
-    .bind(payload.as_of_date)
+    .bind(payload.valid_at)
+    .bind(payload.chosen_fact_id)
+    .bind(payload.chosen_observation_id)
     .bind(&payload.policy)
     .bind(&payload.sources_tried)
     .bind(&payload.per_source_answers)
-    .bind(&payload.canonical_value)
     .execute(pool)
     .await
-    .map_err(|e| MarketDataProviderError::Infrastructure(format!("record_reconciliation_audit: {e}")))?;
+    .map_err(|e| {
+        MarketDataProviderError::Infrastructure(format!("record_reconciliation_audit: {e}"))
+    })?;
 
     let row: ReconciliationAuditRow = sqlx::query_as(
-        "SELECT id, asset_id, fact_type, as_of_date, policy, sources_tried, per_source_answers, canonical_value, decided_at \
-         FROM data_source_reconciliation_audits WHERE id = $1",
+        "SELECT id, subject_kind, subject_id, fact_type, valid_at, chosen_fact_id, \
+                chosen_observation_id, policy, sources_tried, per_source_answers, decided_at \
+         FROM fact_reconciliations WHERE id = $1",
     )
     .bind(id)
     .fetch_one(pool)
     .await
-    .map_err(|e| MarketDataProviderError::Infrastructure(format!("record_reconciliation_audit read: {e}")))?;
+    .map_err(|e| {
+        MarketDataProviderError::Infrastructure(format!("record_reconciliation_audit read: {e}"))
+    })?;
     Ok(row)
 }

@@ -71,7 +71,7 @@ pub struct RuleId(pub Uuid);
 #[sqlx(transparent)]
 #[serde(transparent)]
 pub struct DataSourceRefreshRunId(pub Uuid);
-/// A typed id for a `data_source_reconciliation_audits` audit row.
+/// A typed id for a `fact_reconciliations` audit row.
 /// Implements FR-022 of spec 017-yahoo-data-source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(transparent)]

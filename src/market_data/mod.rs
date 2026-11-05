@@ -7,9 +7,9 @@
 //! batch reference-data load of spec 018, and `load_range` drives it once per
 //! calendar day over a requested range.
 //!
-//! This module sits on top of the predecessor's `domain::asset_reference_data`
-//! (writes go through `create_asset_reference_data`). It keeps zero direct
-//! third-party dependencies — concrete providers live in
+//! Writes go through the normalized `temporal::write_fact` /
+//! `temporal::observations::append_observation` surface; market prices are
+//! typed observations, never JSON payloads. Concrete providers live in
 //! `obolargus_server::market_data_provider` to honor `obolargus_core`'s
 //! dependency-light rule.
 

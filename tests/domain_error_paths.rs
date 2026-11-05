@@ -108,9 +108,9 @@ async fn delete_asset_rejects_an_asset_with_reference_data() {
     .expect("create asset");
 
     sqlx::query(
-        "INSERT INTO asset_reference_data \
-         (id, asset_id, fact_type, valid_at, known_at, value, source) \
-         VALUES (gen_random_uuid(), $1, 'market_price', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}', 'test')",
+        "INSERT INTO temporal_facts \
+         (id, asset_id, fact_type, valid_at, known_at, source, content_hash) \
+         VALUES (gen_random_uuid(), $1, 'nav', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'test', 'hash')",
     )
     .bind(asset.id)
     .execute(&pool)
@@ -481,9 +481,9 @@ async fn delete_issuer_rejects_an_issuer_with_reference_data() {
     .expect("create issuer");
 
     sqlx::query(
-        "INSERT INTO issuer_reference_data \
-         (id, issuer_id, fact_type, valid_at, known_at, value, source) \
-         VALUES (gen_random_uuid(), $1, 'lei', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}', 'test')",
+        "INSERT INTO temporal_facts \
+         (id, issuer_id, fact_type, valid_at, known_at, source, content_hash) \
+         VALUES (gen_random_uuid(), $1, 'credit_rating', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'test', 'hash')",
     )
     .bind(issuer.id)
     .execute(&pool)

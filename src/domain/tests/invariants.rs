@@ -24,11 +24,10 @@
 //!    always set quantity to 0. The position materialization test fails.
 //! 5. **events_immutable** — add an `update_event` function. The
 //!    `update_event_is_rejected_at_api_level` test fails to compile.
-//! 6. **reference_data_dual_temporal** — change `create_asset_reference_data`
-//!    to accept `knowledge_date = None`. The persisted-record test fails.
-//! 7. **conflict_resolution_by_knowledge_date** — change
-//!    `get_current_asset_reference_data` to `ORDER BY knowledge_date ASC`.
-//!    The latest-knowledge test fails.
+//! 6. **reference_data_dual_temporal** — remove the `known_at` field from
+//!    `FactInput`. The typed-fact tests fail to compile.
+//! 7. **conflict_resolution_by_known_at** — change the fact resolver to
+//!    `ORDER BY known_at ASC`. The latest-knowledge test fails.
 //! 8. **per_field_aggregates_declared** — remove the aggregate from one
 //!    field in `model_description()`. The model_description test fails.
 //! 9. **last_is_time_coordinated** — change the `last` aggregate
@@ -112,16 +111,16 @@ fn invariant_05_events_immutable() {
 
 #[test]
 fn invariant_06_reference_data_dual_temporal() {
-    // Tested in `asset_reference_data::tests::create_asset_reference_data_persists_record`.
+    // Tested in `temporal_facts::same_day_revisions_are_distinct_and_ordered`.
     let desc = model_description();
     assert!(desc.invariants.iter().any(|i| i.contains("dual-temporal")));
 }
 
 #[test]
 fn invariant_07_conflict_resolution_by_knowledge_date() {
-    // Tested in `asset_reference_data::tests::get_current_asset_reference_data_returns_latest_knowledge`.
+    // Tested in `temporal_facts::same_day_revisions_are_distinct_and_ordered`.
     let desc = model_description();
-    assert!(desc.invariants.iter().any(|i| i.contains("knowledge_date")));
+    assert!(desc.invariants.iter().any(|i| i.contains("known_at")));
 }
 
 #[test]

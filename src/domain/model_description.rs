@@ -213,46 +213,6 @@ pub fn model_description() -> ModelDescription {
                 ],
             },
             EntityDescription {
-                name: "AssetReferenceData",
-                fields: vec![
-                    FieldDescription {
-                        name: "id",
-                        type_domain: "uuid",
-                        aggregates: &["none"],
-                    },
-                    FieldDescription {
-                        name: "asset_id",
-                        type_domain: "uuid",
-                        aggregates: &["none"],
-                    },
-                    FieldDescription {
-                        name: "fact_type",
-                        type_domain: "text",
-                        aggregates: &["count"],
-                    },
-                    FieldDescription {
-                        name: "as_of_date",
-                        type_domain: "date",
-                        aggregates: &["min", "max"],
-                    },
-                    FieldDescription {
-                        name: "knowledge_date",
-                        type_domain: "date",
-                        aggregates: &["min", "max", "last"],
-                    },
-                    FieldDescription {
-                        name: "value",
-                        type_domain: "text",
-                        aggregates: &["none"],
-                    },
-                    FieldDescription {
-                        name: "source",
-                        type_domain: "text",
-                        aggregates: &["none"],
-                    },
-                ],
-            },
-            EntityDescription {
                 name: "Issuer",
                 fields: vec![
                     FieldDescription {
@@ -288,8 +248,10 @@ pub fn model_description() -> ModelDescription {
                     },
                 ],
             },
+            // Feature 027: the normalized fact model. One envelope holds
+            // identity, time and provenance; the catalog defines the value.
             EntityDescription {
-                name: "IssuerReferenceData",
+                name: "TemporalFact",
                 fields: vec![
                     FieldDescription {
                         name: "id",
@@ -297,7 +259,12 @@ pub fn model_description() -> ModelDescription {
                         aggregates: &["none"],
                     },
                     FieldDescription {
-                        name: "issuer_id",
+                        name: "subject_kind",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "subject_id",
                         type_domain: "uuid",
                         aggregates: &["none"],
                     },
@@ -307,29 +274,154 @@ pub fn model_description() -> ModelDescription {
                         aggregates: &["count"],
                     },
                     FieldDescription {
-                        name: "as_of_date",
-                        type_domain: "date",
+                        name: "valid_at",
+                        type_domain: "timestamp",
                         aggregates: &["min", "max"],
                     },
                     FieldDescription {
-                        name: "knowledge_date",
-                        type_domain: "date",
+                        name: "known_at",
+                        type_domain: "timestamp",
                         aggregates: &["min", "max", "last"],
-                    },
-                    FieldDescription {
-                        name: "value",
-                        type_domain: "text",
-                        aggregates: &["none"],
                     },
                     FieldDescription {
                         name: "source",
                         type_domain: "text",
                         aggregates: &["none"],
                     },
+                    FieldDescription {
+                        name: "retracted",
+                        type_domain: "boolean",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "retraction_reason",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "content_hash",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
                 ],
             },
             EntityDescription {
-                name: "PortfolioReferenceData",
+                name: "FactType",
+                fields: vec![
+                    FieldDescription {
+                        name: "fact_type",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "display_name",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "description",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "storage_kind",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "aggregation",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "unit",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "observation_kind",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "interval_seconds",
+                        type_domain: "integer",
+                        aggregates: &["min", "max"],
+                    },
+                    FieldDescription {
+                        name: "schema_version",
+                        type_domain: "integer",
+                        aggregates: &["max"],
+                    },
+                    FieldDescription {
+                        name: "active",
+                        type_domain: "boolean",
+                        aggregates: &["count"],
+                    },
+                ],
+            },
+            EntityDescription {
+                name: "FactField",
+                fields: vec![
+                    FieldDescription {
+                        name: "fact_type",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "field_name",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "ordinal",
+                        type_domain: "integer",
+                        aggregates: &["min", "max"],
+                    },
+                    FieldDescription {
+                        name: "data_type",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "nullable",
+                        type_domain: "boolean",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "unit",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "precision",
+                        type_domain: "integer",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "scale",
+                        type_domain: "integer",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "allowed_values",
+                        type_domain: "text[]",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "aggregates",
+                        type_domain: "text[]",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "description",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                ],
+            },
+            EntityDescription {
+                name: "MarketObservation",
                 fields: vec![
                     FieldDescription {
                         name: "id",
@@ -337,39 +429,92 @@ pub fn model_description() -> ModelDescription {
                         aggregates: &["none"],
                     },
                     FieldDescription {
-                        name: "portfolio_id",
+                        name: "asset_id",
                         type_domain: "uuid",
                         aggregates: &["none"],
                     },
                     FieldDescription {
-                        name: "fact_type",
+                        name: "kind",
                         type_domain: "text",
                         aggregates: &["count"],
                     },
                     FieldDescription {
-                        name: "as_of_date",
-                        type_domain: "date",
+                        name: "interval_seconds",
+                        type_domain: "integer",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "valid_at",
+                        type_domain: "timestamp",
                         aggregates: &["min", "max"],
                     },
                     FieldDescription {
-                        name: "knowledge_date",
-                        type_domain: "date",
+                        name: "known_at",
+                        type_domain: "timestamp",
                         aggregates: &["min", "max", "last"],
-                    },
-                    FieldDescription {
-                        name: "value",
-                        type_domain: "text",
-                        aggregates: &["none"],
                     },
                     FieldDescription {
                         name: "source",
                         type_domain: "text",
                         aggregates: &["none"],
                     },
+                    FieldDescription {
+                        name: "content_hash",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "open",
+                        type_domain: "decimal",
+                        aggregates: &["min", "max", "last"],
+                    },
+                    FieldDescription {
+                        name: "high",
+                        type_domain: "decimal",
+                        aggregates: &["min", "max", "last"],
+                    },
+                    FieldDescription {
+                        name: "low",
+                        type_domain: "decimal",
+                        aggregates: &["min", "max", "last"],
+                    },
+                    FieldDescription {
+                        name: "close",
+                        type_domain: "decimal",
+                        aggregates: &["min", "max", "last"],
+                    },
+                    FieldDescription {
+                        name: "adjclose",
+                        type_domain: "decimal",
+                        aggregates: &["min", "max", "last"],
+                    },
+                    FieldDescription {
+                        name: "price",
+                        type_domain: "decimal",
+                        aggregates: &["last"],
+                    },
+                    FieldDescription {
+                        name: "volume",
+                        type_domain: "decimal",
+                        aggregates: &["sum", "min", "max", "last"],
+                    },
+                    FieldDescription {
+                        name: "currency",
+                        type_domain: "text",
+                        aggregates: &["none"],
+                    },
+                    FieldDescription {
+                        name: "adjustment",
+                        type_domain: "text",
+                        aggregates: &["count"],
+                    },
+                    FieldDescription {
+                        name: "retracted",
+                        type_domain: "boolean",
+                        aggregates: &["count"],
+                    },
                 ],
             },
-            // US8 (2026-10-18): external identifiers. Current-state keys,
-            // not dual-temporal facts — no as_of_date / knowledge_date.
             EntityDescription {
                 name: "AssetIdentifier",
                 fields: vec![
@@ -491,7 +636,7 @@ pub fn model_description() -> ModelDescription {
             },
             RelationshipDescription {
                 from: "Portfolio",
-                to: "PortfolioReferenceData",
+                to: "TemporalFact",
                 label: "described_by",
                 cardinality_from: "1",
                 cardinality_to: "0..*",
@@ -540,16 +685,23 @@ pub fn model_description() -> ModelDescription {
             },
             RelationshipDescription {
                 from: "Asset",
-                to: "AssetReferenceData",
+                to: "TemporalFact",
                 label: "described_by",
-                cardinality_from: "0..*",
+                cardinality_from: "1",
+                cardinality_to: "0..*",
+            },
+            RelationshipDescription {
+                from: "Asset",
+                to: "MarketObservation",
+                label: "observed_by",
+                cardinality_from: "1",
                 cardinality_to: "0..*",
             },
             RelationshipDescription {
                 from: "Issuer",
-                to: "IssuerReferenceData",
+                to: "TemporalFact",
                 label: "described_by",
-                cardinality_from: "0..*",
+                cardinality_from: "1",
                 cardinality_to: "0..*",
             },
             // US2b: issuer DAG
@@ -575,6 +727,28 @@ pub fn model_description() -> ModelDescription {
                 cardinality_from: "1",
                 cardinality_to: "0..*",
             },
+            // Feature 027: the catalog types every fact and observation.
+            RelationshipDescription {
+                from: "FactType",
+                to: "FactField",
+                label: "defined_by",
+                cardinality_from: "1",
+                cardinality_to: "0..*",
+            },
+            RelationshipDescription {
+                from: "TemporalFact",
+                to: "FactType",
+                label: "typed_by",
+                cardinality_from: "0..*",
+                cardinality_to: "1",
+            },
+            RelationshipDescription {
+                from: "MarketObservation",
+                to: "FactType",
+                label: "typed_by",
+                cardinality_from: "0..*",
+                cardinality_to: "1",
+            },
             // US9 (2026-10-20): portfolio rules — many-to-many, because a
             // rule is shared and governs every portfolio it is attached to.
             RelationshipDescription {
@@ -591,8 +765,8 @@ pub fn model_description() -> ModelDescription {
             "Any level may carry accounting.",
             "Positions are derived from events.",
             "Events are immutable.",
-            "Reference data is dual-temporal.",
-            "Conflict resolution is by knowledge_date.",
+            "Every fact and observation is dual-temporal and append-only.",
+            "Conflict resolution is by known_at.",
             "Per-field aggregates are declared, not inferred.",
             "`last` is time-coordinated.",
             "Numeric-only constraint: no sum/avg on non-numeric fields.",
@@ -607,6 +781,10 @@ pub fn model_description() -> ModelDescription {
             "Rule names are unique across the rule catalog.",
             "Rules are not inherited from ancestor portfolios.",
             "A portfolio carries a given rule at most once.",
+            "A fact has exactly one subject reference.",
+            "Every fact value is typed by the catalog.",
+            "Market prices are observations, not reference facts.",
+            "No canonical fact value is stored as text or JSON.",
         ],
     }
 }

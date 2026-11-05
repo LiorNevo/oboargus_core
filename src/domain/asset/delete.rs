@@ -6,15 +6,17 @@ use sqlx::PgPool;
 use crate::domain::error::DomainError;
 use crate::domain::id::AssetId;
 
-/// Delete an asset. Rejects if the asset has any `AssetReferenceData`
-/// records.
+/// Delete an asset. Rejects if the asset has any typed facts or market
+/// observations.
 /// Implements FR-019 of spec 016-implement-domain-model.
 pub async fn delete_asset(pool: &PgPool, id: AssetId) -> Result<(), DomainError> {
-    let (ref_count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM asset_reference_data WHERE asset_id = $1")
-            .bind(id.as_uuid())
-            .fetch_one(pool)
-            .await?;
+    let (ref_count,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM temporal_facts WHERE asset_id = $1) \
+              + (SELECT COUNT(*) FROM market_observations WHERE asset_id = $1)",
+    )
+    .bind(id.as_uuid())
+    .fetch_one(pool)
+    .await?;
     if ref_count > 0 {
         return Err(DomainError::cannot_delete(
             "Asset",

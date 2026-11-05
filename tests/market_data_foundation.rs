@@ -36,6 +36,10 @@ async fn migrated_pool() -> Option<PgPool> {
         eprintln!("SKIPPED: could not apply the migrations: {error}");
         return None;
     }
+    if let Err(error) = obolargus_core::temporal::catalog::sync_fact_catalog(&pool).await {
+        eprintln!("SKIPPED: could not sync the fact catalog: {error}");
+        return None;
+    }
     Some(pool)
 }
 
@@ -50,7 +54,7 @@ async fn migration_creates_the_three_market_data_tables() {
     for table in [
         "data_sources",
         "data_source_refresh_runs",
-        "data_source_reconciliation_audits",
+        "fact_reconciliations",
     ] {
         let exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
@@ -145,10 +149,10 @@ async fn reconciliation_audit_requires_two_sources() {
     };
 
     let result = sqlx::query(
-        "INSERT INTO data_source_reconciliation_audits \
-         (id, asset_id, fact_type, as_of_date, policy, sources_tried, per_source_answers, canonical_value) \
-         VALUES (gen_random_uuid(), $1, 'market_price', CURRENT_DATE, 'primary_wins', \
-                 ARRAY['only_one'], '{}'::jsonb, '{}')",
+        "INSERT INTO fact_reconciliations \
+         (id, subject_kind, subject_id, fact_type, valid_at, policy, sources_tried, per_source_answers) \
+         VALUES (gen_random_uuid(), 'asset', $1, 'market_price', CURRENT_TIMESTAMP, 'primary_wins', \
+                 ARRAY['only_one'], '{}'::jsonb)",
     )
     .bind(asset_id)
     .execute(&pool)

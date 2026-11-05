@@ -1,20 +1,16 @@
 //! High-level financial domain model.
 //!
-//! Implements the 11 entities, 15 relationships, and 16 invariants defined
-//! in `specs/015-database-uml-domains/spec.md` (the 12th relationship and
-//! 12th invariant are the issuer DAG added in US2b; the 13th and 14th
-//! relationships and the 13th invariant are the external identifiers added
-//! in US8; the 15th relationship and the 14th, 15th and 16th invariants are
-//! the portfolio rules added in US9). See the spec for the model and
-//! `specs/016-implement-domain-model/spec.md` for the implementation
-//! contract.
+//! Implements the high-level entities, relationships, and invariants defined
+//! in `specs/015-database-uml-domains/spec.md`, plus the normalized fact
+//! model of `specs/027-normalized-fact-model/spec.md`. Reference-data facts
+//! are typed and append-only in `crate::temporal`; this module owns the
+//! identity, position, event, identifier, and rule entities.
 //!
 //! Module organization: one submodule per high-level entity, plus shared
 //! scaffolding (`error`, `id`, `model_description`, `seed`).
 
 pub mod asset;
 pub mod asset_identifier;
-pub mod asset_reference_data;
 pub mod entity_accessors;
 pub mod error;
 pub mod event;
@@ -22,10 +18,8 @@ pub mod id;
 pub mod identifier;
 pub mod issuer;
 pub mod issuer_identifier;
-pub mod issuer_reference_data;
 pub mod model_description;
 pub mod portfolio;
-pub mod portfolio_reference_data;
 pub mod position;
 pub mod rule;
 pub mod seed;

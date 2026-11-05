@@ -7,7 +7,7 @@
 //!
 //! For position versions the valid time participates first
 //! (`valid_at DESC, known_at DESC, id DESC`); callers pre-filter by
-//! `valid_at <= T` and hand the survivors to [`resolve`](crate::temporal::resolution::resolve), which applies the
+//! `valid_at <= T` and hand the survivors to [`crate::temporal::resolution::resolve`], which applies the
 //! shared `known_at, id` tail.
 
 use chrono::{DateTime, Utc};

@@ -102,7 +102,7 @@ pub struct AssetOption {
     pub primary_identifier: Option<String>,
 }
 
-/// Parameters for [`search_asset_options`](super::read::search_asset_options).
+/// Parameters for [`crate::domain::asset::read::search_asset_options`].
 #[derive(Debug, Clone, Default)]
 pub struct AssetSearchQuery {
     /// Free-text query; empty or `None` matches every asset.

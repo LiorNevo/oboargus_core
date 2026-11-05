@@ -64,9 +64,8 @@ async fn tx_pool_from_with_test_url_truncates_and_yields_a_usable_pool() {
         "positions",
         "asset_identifiers",
         "issuer_identifiers",
-        "asset_reference_data",
-        "issuer_reference_data",
-        "portfolio_reference_data",
+        "temporal_facts",
+        "market_observations",
     ] {
         let n: i64 =
             sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
@@ -270,29 +269,29 @@ async fn setup_commit_trap(base_url: &str) {
     // the transaction is aborted and the deferred FK constraint
     // is never checked at COMMIT time).
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS asset_reference_data ( \
+        "CREATE TABLE IF NOT EXISTS fact_text_values ( \
              id UUID PRIMARY KEY \
          )",
     )
     .execute(&mut conn)
     .await
-    .expect("create asset_reference_data");
+    .expect("create fact_text_values");
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS issuer_reference_data ( \
+        "CREATE TABLE IF NOT EXISTS fact_decimal_values ( \
              id UUID PRIMARY KEY \
          )",
     )
     .execute(&mut conn)
     .await
-    .expect("create issuer_reference_data");
+    .expect("create fact_decimal_values");
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS portfolio_reference_data ( \
+        "CREATE TABLE IF NOT EXISTS fact_integer_values ( \
              id UUID PRIMARY KEY \
          )",
     )
     .execute(&mut conn)
     .await
-    .expect("create portfolio_reference_data");
+    .expect("create fact_integer_values");
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS asset_identifiers ( \
              id UUID PRIMARY KEY \
@@ -368,12 +367,12 @@ async fn setup_commit_trap(base_url: &str) {
     .execute(&mut conn)
     .await
     .expect("create function");
-    sqlx::query("DROP TRIGGER IF EXISTS trap ON asset_reference_data")
+    sqlx::query("DROP TRIGGER IF EXISTS trap ON fact_text_values")
         .execute(&mut conn)
         .await
         .expect("drop trigger");
     sqlx::query(
-        "CREATE TRIGGER trap BEFORE TRUNCATE ON asset_reference_data \
+        "CREATE TRIGGER trap BEFORE TRUNCATE ON fact_text_values \
          FOR EACH STATEMENT EXECUTE FUNCTION trap_fn()",
     )
     .execute(&mut conn)

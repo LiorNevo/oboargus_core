@@ -28,7 +28,6 @@ use obolargus_core::domain::asset::create::{create_asset, create_asset_with_iden
 use obolargus_core::domain::asset::entity::NewAsset;
 use obolargus_core::domain::asset_identifier::create::create_asset_identifier;
 use obolargus_core::domain::asset_identifier::entity::NewAssetIdentifier;
-use obolargus_core::domain::asset_reference_data::read::get_current_asset_reference_data;
 use obolargus_core::domain::error::DomainError;
 use obolargus_core::domain::id::{AssetId, DomainId};
 use obolargus_core::market_data::audit::{finish_load_run, get_load_run, start_load_run};
@@ -216,7 +215,7 @@ async fn seed_asset(pool: &sqlx::PgPool, scheme: &str, value: &str) -> uuid::Uui
 /// Counts the stored market-price rows for an asset and date.
 async fn count_rows(pool: &sqlx::PgPool, asset_id: uuid::Uuid, date: NaiveDate) -> i64 {
     let (count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM asset_reference_data WHERE asset_id = $1 AND fact_type = 'market_price' AND as_of_date = $2")
+        sqlx::query_as("SELECT COUNT(*) FROM market_observations WHERE asset_id = $1 AND kind = 'eod' AND interval_seconds = 0 AND (valid_at AT TIME ZONE 'UTC')::date = $2")
             .bind(asset_id)
             .bind(date)
             .fetch_one(pool)
@@ -265,13 +264,18 @@ async fn valid_request_stores_one_row_per_resolved_asset() {
     assert_eq!(report.identifiers[0].outcome, LoadOutcome::Loaded);
     assert_eq!(count_rows(&pool, asset_id, date).await, 1);
 
-    // The stored row carries the answering source and the requested date.
-    let stored = get_current_asset_reference_data(&pool, AssetId(asset_id), "market_price", date)
-        .await
-        .expect("read")
-        .expect("row");
+    // The stored observation carries the answering source and the requested date.
+    let stored = obolargus_core::temporal::facts::read::fact_at(
+        &pool,
+        obolargus_core::temporal::FactSubject::Asset(AssetId::from_uuid(asset_id)),
+        "market_price",
+        obolargus_core::temporal::ValidAt::midnight_utc(date),
+    )
+    .await
+    .expect("read")
+    .expect("row");
     assert_eq!(stored.source, "yahoo_finance");
-    assert_eq!(stored.as_of_date, date);
+    assert_eq!(stored.valid_at.as_datetime().date_naive(), date);
 }
 
 /// An unknown identifier is skipped and reported; the others still load.
@@ -384,14 +388,21 @@ async fn load_writes_through_the_canonical_api() {
     .await
     .expect("report");
 
-    let stored = get_current_asset_reference_data(&pool, AssetId(asset_id), "market_price", date)
-        .await
-        .expect("read")
-        .expect("row");
-    let value: serde_json::Value = serde_json::from_str(&stored.value).expect("json");
-    assert_eq!(value["close"], "100");
-    assert_eq!(value["volume"], 1_000_000i64);
-    assert!(value["open"].is_string(), "prices are decimal strings");
+    let stored = obolargus_core::temporal::facts::read::fact_at(
+        &pool,
+        obolargus_core::temporal::FactSubject::Asset(AssetId::from_uuid(asset_id)),
+        "market_price",
+        obolargus_core::temporal::ValidAt::midnight_utc(date),
+    )
+    .await
+    .expect("read")
+    .expect("row");
+    let obolargus_core::temporal::FactValue::MarketPrice(price) = stored.value.expect("value")
+    else {
+        panic!("expected a market price");
+    };
+    assert_eq!(price.close, rust_decimal::Decimal::from(100));
+    assert_eq!(price.volume, Some(rust_decimal::Decimal::from(1_000_000)));
 }
 
 /// The audit row round-trips its counters and the requested source.

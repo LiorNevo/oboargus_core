@@ -25,16 +25,22 @@ use sqlx::migrate::MigrateError;
 /// [`truncate_test_tables`] to wipe the test schema without
 /// tripping the foreign-key constraints.
 pub const TABLES: &[&str] = &[
-    "asset_reference_data",
-    "issuer_reference_data",
-    "portfolio_reference_data",
+    "fact_text_values",
+    "fact_decimal_values",
+    "fact_integer_values",
+    "fact_boolean_values",
+    "fact_date_values",
+    "fact_timestamp_values",
+    "temporal_facts",
+    "market_observations",
+    "fact_reconciliations",
+    "data_source_fact_types",
     "asset_identifiers",
     "issuer_identifiers",
     "rules",
     "portfolio_rules",
     "positions",
     "events",
-    "data_source_reconciliation_audits",
     "data_source_refresh_runs",
     "data_sources",
     "assets",
@@ -49,9 +55,8 @@ pub const TABLES: &[&str] = &[
 /// `rules` and `portfolio_rules` ARE counted: the rule catalog and its
 /// portfolio links are high-level state (US9).
 pub const CHECK_TABLES: &[&str] = &[
-    "asset_reference_data",
-    "issuer_reference_data",
-    "portfolio_reference_data",
+    "temporal_facts",
+    "market_observations",
     "rules",
     "portfolio_rules",
     "positions",
@@ -131,7 +136,17 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), DomainError> {
     sqlx::migrate!("./migrations")
         .run(pool)
         .await
-        .map_err(|e: MigrateError| DomainError::Infrastructure(sqlx::Error::Migrate(Box::new(e))))
+        .map_err(|e: MigrateError| {
+            DomainError::Infrastructure(sqlx::Error::Migrate(Box::new(e)))
+        })?;
+    crate::temporal::catalog::sync_fact_catalog(pool)
+        .await
+        .map_err(|error| match error {
+            crate::temporal::TemporalError::Infrastructure(inner) => {
+                DomainError::Infrastructure(inner)
+            }
+            other => DomainError::Validation(other.to_string()),
+        })
 }
 
 /// Return the total row count across every high-level table

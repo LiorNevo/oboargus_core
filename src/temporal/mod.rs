@@ -1,34 +1,34 @@
 //! Bitemporal market data and the intraday time model.
 //!
-//! Implements `specs/021-bitemporal-market-data/spec.md`. This module is the
-//! append-only, instant-based counterpart to [`crate::domain`]: every fact
-//! carries an independent valid time (`valid_at`) and transaction time
-//! (`known_at`), and resolution happens at read time using a single documented
-//! rule (see [`resolution`](crate::temporal::resolution)).
-//!
-//! The existing `crate::domain` surface keeps its signatures; the temporal
-//! module is additive.
+//! Implements `specs/021-bitemporal-market-data/spec.md` and the normalized
+//! fact model of `specs/027-normalized-fact-model/spec.md`. Every fact carries
+//! an independent valid time (`valid_at`) and transaction time (`known_at`),
+//! and resolution happens at read time using one documented rule.
 
-/// The shared append-only instant model (`ValidAt`, `KnownAt`,
-/// `TemporalWindow`).
+/// The machine-readable fact catalog (the data dictionary).
+pub mod catalog;
+/// Typed errors for the temporal surface.
 pub mod error;
-/// Bitemporal facts for assets, issuers, and portfolios.
+/// Typed append-only facts for assets, issuers, and portfolios.
 pub mod facts;
-/// Feed orchestration and stream adaptation (delivered by US5).
+/// Feed orchestration and stream adaptation.
 pub mod ingest;
 /// The UTC instant newtypes and the precision guard.
 pub mod instant;
-/// Intraday market observations (delivered by US3).
+/// Typed market observations (EOD bars, intraday bars, quotes).
 pub mod observations;
-/// Position and valuation history (delivered by US4).
+/// Position and valuation history.
 pub mod positions;
 /// Bitemporal resolution: the single winner-selection rule.
 pub mod resolution;
-/// Retention, rollup, and archive-aware reads (delivered by US6).
+/// Retention, rollup, and archive-aware reads.
 pub mod retention;
-/// Operator-facing integrity checks (parity and look-ahead).
+/// Operator-facing integrity checks.
 pub mod verify;
 
 pub use error::TemporalError;
-pub use facts::{FactPoint, FactSubject};
+pub use facts::{
+    Adjustment, FactCoverage, FactInput, FactPoint, FactSeriesPage, FactSubject, FactValue,
+    MarketPriceValue, RetractionInput, retract_fact, write_fact, write_fact_outcome,
+};
 pub use instant::{KnownAt, TemporalWindow, ValidAt};

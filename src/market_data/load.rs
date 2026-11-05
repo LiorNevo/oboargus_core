@@ -5,8 +5,8 @@
 //! "load reference data" operation: given a list of typed identifiers and a
 //! single as-of date, it resolves every identifier to its asset, fetches that
 //! asset's end-of-day value for the date through the source-agnostic
-//! registry (fail-over included), stores it through the canonical
-//! dual-temporal write API, and returns a per-identifier execution report.
+//! registry (fail-over included), stores it as a typed market observation,
+//! and returns a per-identifier execution report.
 //!
 //! The CLI (FR-011) and the API (FR-012) are thin witnesses of this one
 //! operation — neither implements its own fetch/store loop.
@@ -30,12 +30,8 @@ use uuid::Uuid;
 use crate::domain::asset::create::create_asset_with_identifier;
 use crate::domain::asset::entity::{Asset, NewAsset};
 use crate::domain::asset_identifier::read as asset_identifier_read;
-use crate::domain::asset_reference_data::create as asset_reference_data_create;
-use crate::domain::asset_reference_data::entity::NewAssetReferenceData;
 use crate::domain::error::DomainError;
 use crate::domain::id::AssetId;
-use crate::domain::id::DomainId;
-use crate::domain::time_support::{now_micros, one_microsecond_after, utc_midnight};
 use crate::market_data::audit::{LoadRunContext, finish_load_run, start_load_run_with_context};
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
@@ -47,6 +43,10 @@ use crate::market_data::registry::{
     DataSourceRegistry, RegistrySnapshot, TickerLookupMatch, TickerLookupWalk,
 };
 use crate::market_data::types::{HistoricalRangeRequest, PriceBar, TypedIdentifier};
+use crate::temporal::{
+    Adjustment, FactInput, FactSubject, FactValue, KnownAt, MarketPriceValue, ValidAt,
+    write_fact_outcome,
+};
 
 /// Fact type written by the load operation for end-of-day OHLCV bars.
 ///
@@ -1446,126 +1446,57 @@ async fn store_bar(
     source_id: &str,
     as_of_date: NaiveDate,
 ) -> (StoreOutcome, Option<StoredFactDetail>) {
-    let value_payload = match serde_json::to_string(&serialize_bar(&bar)) {
-        Ok(payload) => payload,
-        Err(error) => {
-            tracing::warn!(error = %error, "could not encode the bar payload");
-            return (StoreOutcome::StorageFailure, None);
-        }
-    };
-    let value = serialize_bar(&bar);
+    let currency = crate::domain::asset::read::get_asset(pool, asset_id)
+        .await
+        .map(|asset| asset.currency)
+        .unwrap_or_else(|_| DEFAULT_ASSET_CURRENCY.to_string());
 
-    let current = current_belief(pool, asset_id, as_of_date, source_id).await;
-    if let Some((current_value, known_at)) = current.as_ref()
-        && current_value == &value_payload
-    {
-        return (
-            StoreOutcome::NoOp,
-            Some(StoredFactDetail {
-                value: value.clone(),
-                as_of_date,
-                known_at: *known_at,
-                source_id: source_id.to_string(),
-            }),
-        );
-    }
+    let value = FactValue::MarketPrice(MarketPriceValue {
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        adjclose: Some(bar.adjclose),
+        volume: Some(rust_decimal::Decimal::from(bar.volume)),
+        currency,
+        adjustment: Adjustment::Unadjusted,
+    });
 
-    let known_at = match current {
-        Some((_, winner)) if Utc::now() <= winner => one_microsecond_after(winner),
-        _ => now_micros(),
-    };
-
-    let new_row = NewAssetReferenceData {
-        asset_id,
+    let input = FactInput {
+        subject: FactSubject::Asset(asset_id),
         fact_type: FACT_TYPE_MARKET_PRICE.to_string(),
-        as_of_date: bar.as_of_date,
-        knowledge_date: known_at.date_naive(),
-        value: value_payload.clone(),
+        valid_at: ValidAt::midnight_utc(as_of_date),
+        known_at: KnownAt::now(),
         source: source_id.to_string(),
+        value,
     };
 
-    match asset_reference_data_create::create_asset_reference_data_with_known_at(
-        pool, new_row, known_at,
-    )
-    .await
-    {
-        Ok(_) => (
-            StoreOutcome::Loaded,
-            Some(StoredFactDetail {
-                value,
-                as_of_date,
-                known_at,
-                source_id: source_id.to_string(),
-            }),
-        ),
+    match write_fact_outcome(pool, input).await {
+        Ok((point, inserted)) => {
+            let detail = point
+                .value
+                .as_ref()
+                .and_then(|value| serde_json::to_value(value).ok())
+                .map(|value| StoredFactDetail {
+                    value,
+                    as_of_date,
+                    known_at: point.known_at.as_datetime(),
+                    source_id: source_id.to_string(),
+                });
+            (
+                if inserted {
+                    StoreOutcome::Loaded
+                } else {
+                    StoreOutcome::NoOp
+                },
+                detail,
+            )
+        }
         Err(error) => {
-            if is_unique_violation(&error) {
-                // A concurrent load wrote the identical fact first: re-read
-                // the current row to tell an idempotent no-op from a real
-                // storage failure (research D12).
-                return match current_belief(pool, asset_id, as_of_date, source_id).await {
-                    Some((value, known_at)) if value == value_payload => (
-                        StoreOutcome::NoOp,
-                        Some(StoredFactDetail {
-                            value: serde_json::from_str(&value).unwrap_or(serde_json::Value::Null),
-                            as_of_date,
-                            known_at,
-                            source_id: source_id.to_string(),
-                        }),
-                    ),
-                    _ => (StoreOutcome::StorageFailure, None),
-                };
-            }
-            tracing::warn!(asset_id = %asset_id, error = %error, "reference-data write failed");
+            tracing::warn!(asset_id = %asset_id, error = %error, "market observation write failed");
             (StoreOutcome::StorageFailure, None)
         }
     }
-}
-
-/// The current belief for `(asset, market_price, valid day, source)`:
-/// its payload and its precise transaction time.
-///
-/// Implements research D12 of spec 018 and FR-010 of spec 021.
-async fn current_belief(
-    pool: &sqlx::PgPool,
-    asset_id: AssetId,
-    as_of_date: NaiveDate,
-    source: &str,
-) -> Option<(String, chrono::DateTime<Utc>)> {
-    match sqlx::query_as::<_, (String, chrono::DateTime<Utc>)>(
-        r#"
-        SELECT value, known_at
-        FROM asset_reference_data
-        WHERE asset_id = $1 AND fact_type = $2 AND valid_at = $3 AND source = $4
-          AND NOT retracted
-        ORDER BY known_at DESC, id DESC LIMIT 1
-        "#,
-    )
-    .bind(asset_id.as_uuid())
-    .bind(FACT_TYPE_MARKET_PRICE)
-    .bind(utc_midnight(as_of_date))
-    .bind(source)
-    .fetch_optional(pool)
-    .await
-    {
-        Ok(row) => row,
-        Err(error) => {
-            tracing::warn!(
-                asset_id = %asset_id,
-                error = %error,
-                "could not read the current reference-data row; assuming the fact is new"
-            );
-            None
-        }
-    }
-}
-
-/// Whether the error is a unique-constraint violation.
-///
-/// Implements FR-004 of spec 018 (research D12: SQLSTATE 23505).
-fn is_unique_violation(error: &crate::domain::error::DomainError) -> bool {
-    let rendered = error.to_string();
-    rendered.contains("23505") || rendered.contains("duplicate key")
 }
 
 /// Assembles the execution report.
@@ -1629,25 +1560,6 @@ fn compute_run_status(counters: &DataSourceLoadCounters) -> RunStatus {
         return RunStatus::Failed;
     }
     RunStatus::Partial
-}
-
-/// Serializes a `PriceBar` as canonical JSON for the reference-data payload.
-///
-/// The shape is `{ "open": "…", "high": "…", "low": "…", "close": "…",
-/// "adjclose": "…", "volume": <u64> }` — prices are decimal *strings* so no
-/// precision is lost through a JSON number round-trip (Constitution
-/// Principle X).
-///
-/// Implements FR-004 of spec 018.
-pub fn serialize_bar(bar: &PriceBar) -> serde_json::Value {
-    serde_json::json!({
-        "open": bar.open.normalize().to_string(),
-        "high": bar.high.normalize().to_string(),
-        "low": bar.low.normalize().to_string(),
-        "close": bar.close.normalize().to_string(),
-        "adjclose": bar.adjclose.normalize().to_string(),
-        "volume": bar.volume,
-    })
 }
 
 #[cfg(test)]

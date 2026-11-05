@@ -30,7 +30,7 @@ pub async fn delete_issuer(pool: &PgPool, id: IssuerId) -> Result<(), DomainErro
     }
 
     let (ref_count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM issuer_reference_data WHERE issuer_id = $1")
+        sqlx::query_as("SELECT COUNT(*) FROM temporal_facts WHERE issuer_id = $1")
             .bind(id.as_uuid())
             .fetch_one(pool)
             .await?;
