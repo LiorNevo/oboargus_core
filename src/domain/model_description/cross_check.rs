@@ -54,8 +54,8 @@ fn fact_model_entities_have_the_declared_fields() {
     for (name, fields) in [
         ("TemporalFact", 10),
         ("FactType", 10),
-        ("FactField", 11),
-        ("MarketObservation", 18),
+        ("FactField", 13),
+        ("MarketObservation", 20),
     ] {
         let e = desc
             .entities

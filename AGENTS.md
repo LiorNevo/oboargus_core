@@ -21,3 +21,9 @@ Operational rules for contributors and AI agents working in this crate.
 
 - Keep this crate dependency-light: it is depended on by server and cli.
 - Shared behaviors must respect `specs/001-boilerplate-submodules/contracts/`.
+- The system data dictionary lives in `src/data_dictionary/`. Its source of
+  truth is `domain::model_description()` plus `temporal::catalog::fact_catalog()`;
+  never add a parallel catalog. After a deliberate model change, run
+  `scripts/schema.sh --update` and commit
+  `schema/system-data-dictionary.json`. Promote the baseline only after a
+  deliberate `x-obolargus-schema-version` bump.

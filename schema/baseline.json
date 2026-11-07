@@ -1,0 +1,2069 @@
+{
+  "$defs": {
+    "Asset": {
+      "additionalProperties": false,
+      "description": "A unit of legal property that can be held in a portfolio.",
+      "properties": {
+        "asset_type": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "backed_by_portfolio_id": {
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "display_name": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "issuer_id": {
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "asset_type",
+        "created_at",
+        "currency",
+        "display_name",
+        "id"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "Asset",
+      "x-obolargus-table": "assets"
+    },
+    "AssetIdentifier": {
+      "additionalProperties": false,
+      "description": "An external identifier scheme value for an asset.",
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "scheme": {
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-known-values": [
+            "ISIN",
+            "CUSIP",
+            "TICKER",
+            "BBGID",
+            "FIGI",
+            "SEDOL",
+            "LEI",
+            "CIK",
+            "RIC",
+            "WKN",
+            "VALOR"
+          ],
+          "x-obolargus-writable": true
+        },
+        "value": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "asset_id",
+        "created_at",
+        "id",
+        "scheme",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "AssetIdentifier",
+      "x-obolargus-table": "asset_identifiers"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "description": "An immutable record of a state change to a position.",
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "effective_date": {
+          "format": "date",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        },
+        "event_type": {
+          "enum": [
+            "buy",
+            "sell",
+            "transfer",
+            "split",
+            "merger",
+            "spin-off",
+            "dividend",
+            "stock-based-compensation"
+          ],
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": true
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "portfolio_id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "quantity_delta": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "sum",
+            "avg",
+            "min",
+            "max"
+          ],
+          "x-obolargus-writable": true
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": false
+        },
+        "to_portfolio_id": {
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "asset_id",
+        "effective_date",
+        "event_type",
+        "id",
+        "portfolio_id",
+        "quantity_delta",
+        "recorded_at"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "Event",
+      "x-obolargus-table": "events"
+    },
+    "FactField": {
+      "additionalProperties": false,
+      "description": "One typed field of a fact type value.",
+      "properties": {
+        "aggregates": {
+          "items": {
+            "enum": [
+              "none",
+              "sum",
+              "avg",
+              "min",
+              "max",
+              "last",
+              "count"
+            ],
+            "type": "string"
+          },
+          "type": "array",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "allowed_values": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "data_type": {
+          "enum": [
+            "text",
+            "decimal",
+            "integer",
+            "boolean",
+            "date",
+            "timestamp"
+          ],
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": false
+        },
+        "description": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "fact_type": {
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-known-values": [
+            "market_price",
+            "name",
+            "gics_sector",
+            "gics_industry",
+            "nav",
+            "credit_rating",
+            "benchmark",
+            "strategy_label",
+            "is_active",
+            "rank",
+            "last_verified_at",
+            "inception_date"
+          ],
+          "x-obolargus-writable": false
+        },
+        "field_name": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "max_value": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,37})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "min_value": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,37})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "nullable": {
+          "type": "boolean",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": false
+        },
+        "ordinal": {
+          "minimum": 1,
+          "type": "integer",
+          "x-obolargus-aggregates": [
+            "min",
+            "max"
+          ],
+          "x-obolargus-writable": false
+        },
+        "precision": {
+          "maximum": 38,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "scale": {
+          "maximum": 18,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        }
+      },
+      "required": [
+        "aggregates",
+        "data_type",
+        "description",
+        "fact_type",
+        "field_name",
+        "nullable",
+        "ordinal"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "FactField",
+      "x-obolargus-table": "fact_type_fields"
+    },
+    "FactType": {
+      "additionalProperties": false,
+      "description": "One fact type in the machine-readable catalog.",
+      "properties": {
+        "active": {
+          "type": "boolean",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": false
+        },
+        "aggregation": {
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "description": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "display_name": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "fact_type": {
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-known-values": [
+            "market_price",
+            "name",
+            "gics_sector",
+            "gics_industry",
+            "nav",
+            "credit_rating",
+            "benchmark",
+            "strategy_label",
+            "is_active",
+            "rank",
+            "last_verified_at",
+            "inception_date"
+          ],
+          "x-obolargus-writable": false
+        },
+        "interval_seconds": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "min",
+            "max"
+          ],
+          "x-obolargus-writable": false
+        },
+        "observation_kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": false
+        },
+        "schema_version": {
+          "minimum": 1,
+          "type": "integer",
+          "x-obolargus-aggregates": [
+            "max"
+          ],
+          "x-obolargus-writable": false
+        },
+        "storage_kind": {
+          "enum": [
+            "text",
+            "decimal",
+            "integer",
+            "boolean",
+            "date",
+            "timestamp",
+            "market_observation"
+          ],
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": false
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        }
+      },
+      "required": [
+        "active",
+        "aggregation",
+        "description",
+        "display_name",
+        "fact_type",
+        "schema_version",
+        "storage_kind"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "FactType",
+      "x-obolargus-table": "fact_types"
+    },
+    "FactType.benchmark": {
+      "additionalProperties": false,
+      "description": "A portfolio's declared benchmark.",
+      "properties": {
+        "type": {
+          "const": "benchmark"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.text"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "none",
+        "display_name": "Benchmark",
+        "fact_type": "benchmark",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "text",
+        "subjects": [
+          "portfolio"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.credit_rating": {
+      "additionalProperties": false,
+      "description": "An issuer's reported credit rating.",
+      "properties": {
+        "type": {
+          "const": "credit_rating"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.text"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "last",
+        "display_name": "Credit rating",
+        "fact_type": "credit_rating",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "text",
+        "subjects": [
+          "issuer"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.gics_industry": {
+      "additionalProperties": false,
+      "description": "The asset's GICS industry classification.",
+      "properties": {
+        "type": {
+          "const": "gics_industry"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.text"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "none",
+        "display_name": "GICS industry",
+        "fact_type": "gics_industry",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "text",
+        "subjects": [
+          "asset"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.gics_sector": {
+      "additionalProperties": false,
+      "description": "The asset's GICS sector classification.",
+      "properties": {
+        "type": {
+          "const": "gics_sector"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.text"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "none",
+        "display_name": "GICS sector",
+        "fact_type": "gics_sector",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "text",
+        "subjects": [
+          "asset"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.inception_date": {
+      "additionalProperties": false,
+      "description": "A portfolio's reported inception date.",
+      "properties": {
+        "type": {
+          "const": "inception_date"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.date"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "min",
+        "display_name": "Inception date",
+        "fact_type": "inception_date",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "date",
+        "subjects": [
+          "portfolio"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.is_active": {
+      "additionalProperties": false,
+      "description": "Whether the subject is currently active.",
+      "properties": {
+        "type": {
+          "const": "is_active"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.boolean"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "last",
+        "display_name": "Active flag",
+        "fact_type": "is_active",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "boolean",
+        "subjects": [
+          "asset",
+          "issuer",
+          "portfolio"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.last_verified_at": {
+      "additionalProperties": false,
+      "description": "When the asset's reference data was last verified.",
+      "properties": {
+        "type": {
+          "const": "last_verified_at"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "max",
+        "display_name": "Last verified at",
+        "fact_type": "last_verified_at",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "timestamp",
+        "subjects": [
+          "asset"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.market_price": {
+      "additionalProperties": false,
+      "description": "End-of-day OHLCV bar for an asset.",
+      "properties": {
+        "type": {
+          "const": "market_price"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.market_price"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "last",
+        "display_name": "Market price",
+        "fact_type": "market_price",
+        "interval_seconds": 0,
+        "observation_kind": "eod",
+        "schema_version": 1,
+        "storage_kind": "market_observation",
+        "subjects": [
+          "asset"
+        ],
+        "unit": "USD"
+      }
+    },
+    "FactType.name": {
+      "additionalProperties": false,
+      "description": "A source-reported name for an asset, issuer, or portfolio.",
+      "properties": {
+        "type": {
+          "const": "name"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.text"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "none",
+        "display_name": "Name",
+        "fact_type": "name",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "text",
+        "subjects": [
+          "asset",
+          "issuer",
+          "portfolio"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.nav": {
+      "additionalProperties": false,
+      "description": "A fund's net asset value per unit.",
+      "properties": {
+        "type": {
+          "const": "nav"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.decimal"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "last",
+        "display_name": "Net asset value",
+        "fact_type": "nav",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "decimal",
+        "subjects": [
+          "asset"
+        ],
+        "unit": "USD"
+      }
+    },
+    "FactType.rank": {
+      "additionalProperties": false,
+      "description": "A source-assigned integer rank for an asset.",
+      "properties": {
+        "type": {
+          "const": "rank"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.integer"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "last",
+        "display_name": "Rank",
+        "fact_type": "rank",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "integer",
+        "subjects": [
+          "asset"
+        ],
+        "unit": null
+      }
+    },
+    "FactType.strategy_label": {
+      "additionalProperties": false,
+      "description": "A portfolio's strategy classification.",
+      "properties": {
+        "type": {
+          "const": "strategy_label"
+        },
+        "value": {
+          "$ref": "#/$defs/FactValue.text"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-fact-type": {
+        "aggregation": "none",
+        "display_name": "Strategy label",
+        "fact_type": "strategy_label",
+        "interval_seconds": null,
+        "observation_kind": null,
+        "schema_version": 1,
+        "storage_kind": "text",
+        "subjects": [
+          "portfolio"
+        ],
+        "unit": null
+      }
+    },
+    "FactValue": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "value": {
+              "$ref": "#/$defs/FactValue.text"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "decimal"
+            },
+            "value": {
+              "$ref": "#/$defs/FactValue.decimal"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "integer"
+            },
+            "value": {
+              "$ref": "#/$defs/FactValue.integer"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "boolean"
+            },
+            "value": {
+              "$ref": "#/$defs/FactValue.boolean"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "date"
+            },
+            "value": {
+              "$ref": "#/$defs/FactValue.date"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "timestamp"
+            },
+            "value": {
+              "$ref": "#/$defs/FactValue.timestamp"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "market_price"
+            },
+            "value": {
+              "$ref": "#/$defs/FactValue.market_price"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FactValue.boolean": {
+      "type": "boolean"
+    },
+    "FactValue.date": {
+      "format": "date",
+      "type": "string"
+    },
+    "FactValue.decimal": {
+      "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+      "type": "string"
+    },
+    "FactValue.integer": {
+      "format": "int64",
+      "pattern": "^-?(?:0|[1-9][0-9]{0,18})$",
+      "type": "string"
+    },
+    "FactValue.market_price": {
+      "additionalProperties": false,
+      "description": "Typed market-price observation payload.",
+      "properties": {
+        "adjclose": {
+          "description": "Split/dividend-adjusted closing price, when supplied.",
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-minimum": "0",
+          "x-obolargus-precision": 38,
+          "x-obolargus-scale": 18,
+          "x-obolargus-unit": "USD"
+        },
+        "adjustment": {
+          "description": "Basis of the close/adjclose pair.",
+          "enum": [
+            "adjusted",
+            "unadjusted"
+          ],
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ]
+        },
+        "close": {
+          "description": "Unadjusted closing price for the observation window.",
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-minimum": "0",
+          "x-obolargus-precision": 38,
+          "x-obolargus-scale": 18,
+          "x-obolargus-unit": "USD"
+        },
+        "currency": {
+          "description": "ISO 4217 quote currency.",
+          "pattern": "^[A-Z]{3}$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ]
+        },
+        "high": {
+          "description": "Highest traded price for the observation window.",
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-minimum": "0",
+          "x-obolargus-precision": 38,
+          "x-obolargus-scale": 18,
+          "x-obolargus-unit": "USD"
+        },
+        "low": {
+          "description": "Lowest traded price for the observation window.",
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-minimum": "0",
+          "x-obolargus-precision": 38,
+          "x-obolargus-scale": 18,
+          "x-obolargus-unit": "USD"
+        },
+        "open": {
+          "description": "Opening price for the observation window.",
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-minimum": "0",
+          "x-obolargus-precision": 38,
+          "x-obolargus-scale": 18,
+          "x-obolargus-unit": "USD"
+        },
+        "volume": {
+          "description": "Traded volume in shares or contracts.",
+          "pattern": "^-?(?:0|[1-9][0-9]{0,37})$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "sum",
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-minimum": "0",
+          "x-obolargus-precision": 38,
+          "x-obolargus-scale": 0,
+          "x-obolargus-unit": "shares"
+        }
+      },
+      "required": [
+        "adjustment",
+        "close",
+        "currency",
+        "high",
+        "low",
+        "open"
+      ],
+      "type": "object"
+    },
+    "FactValue.text": {
+      "type": "string"
+    },
+    "FactValue.timestamp": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "Issuer": {
+      "additionalProperties": false,
+      "description": "The legal entity that issues or guarantees assets.",
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "issuer_type": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "legal_jurisdiction": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "parent_id": {
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "created_at",
+        "id",
+        "issuer_type",
+        "legal_jurisdiction",
+        "name"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "Issuer",
+      "x-obolargus-table": "issuers"
+    },
+    "IssuerIdentifier": {
+      "additionalProperties": false,
+      "description": "An external identifier scheme value for an issuer.",
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "issuer_id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "scheme": {
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-known-values": [
+            "ISIN",
+            "CUSIP",
+            "TICKER",
+            "BBGID",
+            "FIGI",
+            "SEDOL",
+            "LEI",
+            "CIK",
+            "RIC",
+            "WKN",
+            "VALOR"
+          ],
+          "x-obolargus-writable": true
+        },
+        "value": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "created_at",
+        "id",
+        "issuer_id",
+        "scheme",
+        "value"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "IssuerIdentifier",
+      "x-obolargus-table": "issuer_identifiers"
+    },
+    "MarketObservation": {
+      "additionalProperties": false,
+      "description": "A typed market price, bar, or quote observation.",
+      "properties": {
+        "adjclose": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        },
+        "adjustment": {
+          "enum": [
+            "adjusted",
+            "unadjusted",
+            "none"
+          ],
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": true
+        },
+        "asset_id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "close": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        },
+        "content_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "high": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "interval_seconds": {
+          "minimum": 0,
+          "type": "integer",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "kind": {
+          "enum": [
+            "eod",
+            "bar",
+            "quote"
+          ],
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": true
+        },
+        "known_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": false
+        },
+        "low": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        },
+        "open": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        },
+        "price": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "last"
+          ],
+          "x-obolargus-writable": true
+        },
+        "retracted": {
+          "type": "boolean",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": true
+        },
+        "retraction_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "sequence": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "max"
+          ],
+          "x-obolargus-writable": true
+        },
+        "source": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "valid_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max"
+          ],
+          "x-obolargus-writable": false
+        },
+        "volume": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,37})$",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "sum",
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "adjustment",
+        "asset_id",
+        "content_hash",
+        "currency",
+        "id",
+        "interval_seconds",
+        "kind",
+        "known_at",
+        "retracted",
+        "source",
+        "valid_at"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "MarketObservation",
+      "x-obolargus-table": "market_observations"
+    },
+    "Portfolio": {
+      "additionalProperties": false,
+      "description": "A node in the portfolio DAG that groups positions and rules.",
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "created_by": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "parent_id": {
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "purpose": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "created_at",
+        "created_by",
+        "id",
+        "name",
+        "purpose"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "Portfolio",
+      "x-obolargus-table": "portfolios"
+    },
+    "Position": {
+      "additionalProperties": false,
+      "description": "The quantity of one asset held by one portfolio at an instant.",
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        },
+        "asset_id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "portfolio_id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "quantity": {
+          "pattern": "^-?(?:0|[1-9][0-9]{0,19})(?:\\.[0-9]{1,18})?$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "as_of",
+        "asset_id",
+        "portfolio_id",
+        "quantity"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "Position",
+      "x-obolargus-table": "positions"
+    },
+    "Rule": {
+      "additionalProperties": false,
+      "description": "A named rule expression attached to a portfolio.",
+      "properties": {
+        "category": {
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-known-values": [
+            "all_assets",
+            "portfolio_data",
+            "positions",
+            "events"
+          ],
+          "x-obolargus-writable": true
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "created_by": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "description": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "expression": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        }
+      },
+      "required": [
+        "category",
+        "created_at",
+        "created_by",
+        "description",
+        "expression",
+        "id",
+        "name"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "Rule",
+      "x-obolargus-table": "rules"
+    },
+    "TemporalFact": {
+      "additionalProperties": false,
+      "description": "An append-only bitemporal belief about a subject.",
+      "properties": {
+        "content_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "fact_type": {
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-known-values": [
+            "market_price",
+            "name",
+            "gics_sector",
+            "gics_industry",
+            "nav",
+            "credit_rating",
+            "benchmark",
+            "strategy_label",
+            "is_active",
+            "rank",
+            "last_verified_at",
+            "inception_date"
+          ],
+          "x-obolargus-writable": true
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "known_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max",
+            "last"
+          ],
+          "x-obolargus-writable": false
+        },
+        "retracted": {
+          "type": "boolean",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": true
+        },
+        "retraction_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "source": {
+          "minLength": 1,
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": true
+        },
+        "subject_id": {
+          "format": "uuid",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "none"
+          ],
+          "x-obolargus-writable": false
+        },
+        "subject_kind": {
+          "enum": [
+            "asset",
+            "issuer",
+            "portfolio"
+          ],
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "count"
+          ],
+          "x-obolargus-writable": false
+        },
+        "valid_at": {
+          "format": "date-time",
+          "type": "string",
+          "x-obolargus-aggregates": [
+            "min",
+            "max"
+          ],
+          "x-obolargus-writable": false
+        }
+      },
+      "required": [
+        "content_hash",
+        "fact_type",
+        "id",
+        "known_at",
+        "retracted",
+        "source",
+        "subject_id",
+        "subject_kind",
+        "valid_at"
+      ],
+      "type": "object",
+      "x-obolargus-entity": "TemporalFact",
+      "x-obolargus-table": "temporal_facts"
+    }
+  },
+  "$id": "urn:obolargus:schema:system:1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The complete Obolargus data dictionary: persisted domain entities, the normalized fact catalog, and typed fact values.",
+  "title": "Obolargus System Data Dictionary",
+  "x-obolargus-cross-field-constraints": [
+    {
+      "applies_to": "Event",
+      "description": "A transfer event requires to_portfolio_id.",
+      "name": "transfer_requires_destination"
+    },
+    {
+      "applies_to": "Event",
+      "description": "A transfer destination must differ from the source portfolio.",
+      "name": "transfer_not_self"
+    },
+    {
+      "applies_to": "Event",
+      "description": "An event quantity delta must be non-zero.",
+      "name": "quantity_delta_non_zero"
+    },
+    {
+      "applies_to": "MarketObservation",
+      "description": "high >= low, and open/close lie within [low, high].",
+      "name": "market_observation_ohlc_bounds"
+    },
+    {
+      "applies_to": "MarketObservation",
+      "description": "A non-retracted bar carries open, high, low, and close.",
+      "name": "market_observation_bar_shape"
+    },
+    {
+      "applies_to": "MarketObservation",
+      "description": "A non-retracted quote carries price.",
+      "name": "market_observation_quote_shape"
+    },
+    {
+      "applies_to": "MarketObservation",
+      "description": "A non-retracted observation carries price or close.",
+      "name": "market_observation_has_value"
+    },
+    {
+      "applies_to": "TemporalFact/MarketObservation",
+      "description": "A retraction reason is present exactly when retracted is true.",
+      "name": "retraction_reason_iff_retracted"
+    }
+  ],
+  "x-obolargus-invariants": [
+    "Portfolio graph is a DAG.",
+    "An asset may not be backed by a portfolio that contains itself.",
+    "Any level may carry accounting.",
+    "Positions are derived from events.",
+    "Events are immutable.",
+    "Every fact and observation is dual-temporal and append-only.",
+    "Conflict resolution is by known_at.",
+    "Per-field aggregates are declared, not inferred.",
+    "`last` is time-coordinated.",
+    "Numeric-only constraint: no sum/avg on non-numeric fields.",
+    "Identity fields are none.",
+    "Issuer graph is a DAG.",
+    "An external identifier names at most one subject within its domain.",
+    "Rule names are unique across the rule catalog.",
+    "Rules are not inherited from ancestor portfolios.",
+    "A portfolio carries a given rule at most once.",
+    "A fact has exactly one subject reference.",
+    "Every fact value is typed by the catalog.",
+    "Market prices are observations, not reference facts.",
+    "No canonical fact value is stored as text or JSON."
+  ],
+  "x-obolargus-model-version": "0.1.0",
+  "x-obolargus-relationships": [
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Portfolio",
+      "label": "composes",
+      "to": "Portfolio"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Portfolio",
+      "label": "holds",
+      "to": "Position"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Portfolio",
+      "label": "described_by",
+      "to": "TemporalFact"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "1",
+      "from": "Position",
+      "label": "is_quantity_of",
+      "to": "Asset"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Position",
+      "label": "derived_from",
+      "to": "Event"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "1",
+      "from": "Event",
+      "label": "targets",
+      "to": "Portfolio"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "1",
+      "from": "Event",
+      "label": "targets",
+      "to": "Asset"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "0..1",
+      "from": "Asset",
+      "label": "is_backed_by",
+      "to": "Portfolio"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "1",
+      "from": "Asset",
+      "label": "issued_by",
+      "to": "Issuer"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Asset",
+      "label": "described_by",
+      "to": "TemporalFact"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Asset",
+      "label": "observed_by",
+      "to": "MarketObservation"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Issuer",
+      "label": "described_by",
+      "to": "TemporalFact"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "0..1",
+      "from": "Issuer",
+      "label": "parent_of",
+      "to": "Issuer"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Asset",
+      "label": "identified_by",
+      "to": "AssetIdentifier"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "Issuer",
+      "label": "identified_by",
+      "to": "IssuerIdentifier"
+    },
+    {
+      "cardinality_from": "1",
+      "cardinality_to": "0..*",
+      "from": "FactType",
+      "label": "defined_by",
+      "to": "FactField"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "1",
+      "from": "TemporalFact",
+      "label": "typed_by",
+      "to": "FactType"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "1",
+      "from": "MarketObservation",
+      "label": "typed_by",
+      "to": "FactType"
+    },
+    {
+      "cardinality_from": "0..*",
+      "cardinality_to": "0..*",
+      "from": "Portfolio",
+      "label": "governed_by",
+      "to": "Rule"
+    }
+  ],
+  "x-obolargus-schema-version": "1.0.0"
+}

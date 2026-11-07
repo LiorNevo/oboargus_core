@@ -7,6 +7,7 @@
 //! specified in `specs/architecture/entity-framework.md`.
 
 /// Precise decimal parsing for monetary values (no floating point).
+pub mod data_dictionary;
 pub mod decimal;
 
 /// The high-level financial domain model (see `specs/015-database-uml-domains/spec.md`).

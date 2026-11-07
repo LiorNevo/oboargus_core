@@ -30,6 +30,7 @@ openapi = ["dep:utoipa"]
 # release build.
 [dev-dependencies]
 async-trait = "0.1"
+jsonschema = "0.60"
 chrono.workspace = true
 rust_decimal.workspace = true
 serde_json.workspace = true
