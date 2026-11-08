@@ -376,7 +376,7 @@ pub struct IdentifierLoadConfig {
     /// unnamed). One selection per request — never per identifier and never
     /// per type.
     pub preferred_source: Option<String>,
-    /// Audit trigger: `"cli"`, `"api"` or `"test"`.
+    /// Audit trigger: `"cli"`, `"api"`, `"automation"`, or `"test"`.
     pub trigger: String,
     /// When `true`, the load computes the report but persists nothing at
     /// all — no reference-data rows and no run record (FR-008).

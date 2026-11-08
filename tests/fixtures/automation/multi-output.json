@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "Multi-output switch",
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "inject",
+      "type_version": 1,
+      "config": { "payload_type": "json", "payload": { "kind": "a" }, "repeat": "none", "once": true }
+    },
+    {
+      "id": "n2",
+      "type": "switch",
+      "type_version": 1,
+      "config": {
+        "property": "msg.payload.kind",
+        "rules": [{ "operator": "eq", "value": "a", "output": "out" }],
+        "default_output": "default",
+        "check_all": false
+      }
+    },
+    { "id": "n3", "type": "debug", "type_version": 1, "config": { "target": "msg" } },
+    { "id": "n4", "type": "debug", "type_version": 1, "config": { "target": "msg" } }
+  ],
+  "wires": [
+    { "id": "w1", "source": "n1", "source_port": "out", "target": "n2", "target_port": "in" },
+    { "id": "w2", "source": "n2", "source_port": "out", "target": "n3", "target_port": "in" },
+    { "id": "w3", "source": "n2", "source_port": "default", "target": "n4", "target_port": "in" }
+  ],
+  "subflows": []
+}

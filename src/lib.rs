@@ -7,6 +7,7 @@
 //! specified in `specs/architecture/entity-framework.md`.
 
 /// Precise decimal parsing for monetary values (no floating point).
+pub mod automation;
 pub mod data_dictionary;
 pub mod decimal;
 

@@ -1,0 +1,848 @@
+{
+  "generated_by": "obolargus_core::automation::docs::node_types_document",
+  "items": [
+    {
+      "capabilities": [],
+      "category": "error",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Catch configuration.",
+        "properties": {
+          "node_ids": {
+            "default": [],
+            "description": "Selected node ids.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "default": "flow",
+            "description": "`flow` or `selected`.",
+            "type": "string"
+          },
+          "uncaught_only": {
+            "default": false,
+            "description": "Only uncaught errors.",
+            "type": "boolean"
+          }
+        },
+        "title": "CatchConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Receives node errors in its scope and routes them to a recovery path.",
+      "display_name": "Catch",
+      "docs": "The input message carries error.source, error.code, error.message, and error.retry_count.",
+      "icon": "error",
+      "id": "catch",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [
+        "read:context",
+        "write:context"
+      ],
+      "category": "transform",
+      "config_schema": {
+        "$defs": {
+          "ChangeRule": {
+            "description": "One change rule.",
+            "properties": {
+              "action": {
+                "description": "`set`, `change`, or `delete`.",
+                "type": "string"
+              },
+              "from": {
+                "default": null,
+                "description": "Replacement source for `change`.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "key": {
+                "default": null,
+                "description": "Key for context targets.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "path": {
+                "default": null,
+                "description": "Dot path for `msg`.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "target": {
+                "description": "`msg`, `flow`, `global`, or `run`.",
+                "type": "string"
+              },
+              "to": {
+                "default": null,
+                "description": "Replacement target for `change`.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "value": {
+                "default": null,
+                "description": "Value literal or expression object."
+              }
+            },
+            "required": [
+              "action",
+              "target"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Change configuration.",
+        "properties": {
+          "rules": {
+            "description": "Ordered rules.",
+            "items": {
+              "$ref": "#/$defs/ChangeRule"
+            },
+            "type": "array"
+          }
+        },
+        "title": "ChangeConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Sets, changes, or deletes message properties and run/flow/global context values.",
+      "display_name": "Change",
+      "docs": "Context writes are atomic per key and last-write-wins under concurrent runs.",
+      "icon": "edit",
+      "id": "change",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "error",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Complete configuration.",
+        "properties": {
+          "node_ids": {
+            "default": [],
+            "description": "Selected node ids.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "default": "flow",
+            "description": "`flow` or `selected`.",
+            "type": "string"
+          }
+        },
+        "title": "CompleteConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Receives successful-completion events from nodes in its scope.",
+      "display_name": "Complete",
+      "docs": "Informational: a complete node does not change the run status.",
+      "icon": "task_alt",
+      "id": "complete",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [
+        "read:market_data",
+        "write:reference_data"
+      ],
+      "category": "data",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Data-load configuration.",
+        "properties": {
+          "as_of_date": {
+            "default": "",
+            "description": "ISO date or expression object."
+          },
+          "create_missing_assets": {
+            "default": false,
+            "description": "Create missing assets.",
+            "type": "boolean"
+          },
+          "default_currency": {
+            "default": "USD",
+            "description": "Default currency for created assets.",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "Dry run.",
+            "type": "boolean"
+          },
+          "identifiers": {
+            "default": [],
+            "description": "Identifier array or expression object."
+          },
+          "preferred_source": {
+            "default": null,
+            "description": "Preferred source id.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "DataLoadConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Loads reference data for a batch of identifiers on one date.",
+      "display_name": "Load reference data",
+      "docs": "Calls the existing single-date load operation. Per-identifier failures are outcomes, not node failures.",
+      "icon": "database",
+      "id": "data_load",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [
+        "read:market_data",
+        "write:reference_data"
+      ],
+      "category": "data",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Range data-load configuration.",
+        "properties": {
+          "concurrency": {
+            "default": 4,
+            "description": "Scheduling window.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "create_missing_assets": {
+            "default": false,
+            "description": "Create missing assets.",
+            "type": "boolean"
+          },
+          "default_currency": {
+            "default": "USD",
+            "description": "Default currency for created assets.",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "Dry run.",
+            "type": "boolean"
+          },
+          "from": {
+            "default": "",
+            "description": "First date (inclusive)."
+          },
+          "identifiers": {
+            "default": [],
+            "description": "Identifier array or expression object."
+          },
+          "preferred_source": {
+            "default": null,
+            "description": "Preferred source id.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to": {
+            "default": "",
+            "description": "Last date (inclusive)."
+          }
+        },
+        "title": "DataLoadRangeConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Loads reference data for a batch of identifiers over a date range.",
+      "display_name": "Load reference data range",
+      "docs": "Calls the existing range load operation with one registry snapshot and per-date cancellation.",
+      "icon": "date_range",
+      "id": "data_load_range",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "flow",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Debug configuration.",
+        "properties": {
+          "expression": {
+            "default": null,
+            "description": "Expression when target is `expression`."
+          },
+          "target": {
+            "default": "payload",
+            "description": "`payload`, `msg`, or `expression`.",
+            "type": "string"
+          },
+          "to_log": {
+            "default": false,
+            "description": "Emit to the run log.",
+            "type": "boolean"
+          },
+          "to_sidebar": {
+            "default": true,
+            "description": "Emit to the debug sidebar.",
+            "type": "boolean"
+          }
+        },
+        "title": "DebugConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Displays a message in the debug sidebar and/or the run log.",
+      "display_name": "Debug",
+      "docs": "A sink node for inspecting messages. It never changes the message or the run status.",
+      "icon": "bug",
+      "id": "debug",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "flow",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Delay configuration.",
+        "properties": {
+          "mode": {
+            "default": "delay",
+            "description": "`delay` or `rate_limit`.",
+            "type": "string"
+          },
+          "queue_limit": {
+            "default": 1000,
+            "description": "Queue bound for rate limiting.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rate": {
+            "default": 10,
+            "description": "Messages per second for rate limiting.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "seconds": {
+            "default": 1,
+            "description": "Delay seconds.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "title": "DelayConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Delays or rate-limits messages.",
+      "display_name": "Delay",
+      "docs": "Cancellation-aware. Rate limiting uses a bounded queue and fails with node.queue_full on overflow.",
+      "icon": "schedule",
+      "id": "delay",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "trigger",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Inject configuration.",
+        "properties": {
+          "cron_expression": {
+            "default": null,
+            "description": "Cron expression.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "default": true,
+            "description": "Enabled state.",
+            "type": "boolean"
+          },
+          "interval_seconds": {
+            "default": null,
+            "description": "Interval seconds.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "once": {
+            "default": true,
+            "description": "Fire once at run start.",
+            "type": "boolean"
+          },
+          "payload": {
+            "default": null,
+            "description": "Payload literal or expression object."
+          },
+          "payload_type": {
+            "default": "none",
+            "description": "`none`, `string`, `number`, `boolean`, `json`, `timestamp`.",
+            "type": "string"
+          },
+          "repeat": {
+            "default": "none",
+            "description": "`none`, `interval`, `cron`.",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "UTC",
+            "description": "IANA timezone.",
+            "type": "string"
+          }
+        },
+        "title": "InjectConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Emits a configured message manually, on an interval, or on a cron schedule.",
+      "display_name": "Inject",
+      "docs": "Starts a flow with a configured payload. Repeating injects are reconciled into durable triggers on publish.",
+      "icon": "bolt",
+      "id": "inject",
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "notify",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Log configuration.",
+        "properties": {
+          "level": {
+            "default": "info",
+            "description": "Log level.",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "description": "Message template.",
+            "type": "string"
+          }
+        },
+        "title": "LogConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Writes a structured entry to the run log.",
+      "display_name": "Log",
+      "docs": "Message templates use ${...} expressions. Secrets are redacted by the runtime.",
+      "icon": "article",
+      "id": "log",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "notify",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Notification configuration.",
+        "properties": {
+          "level": {
+            "default": "notice",
+            "description": "Level.",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "description": "Notification message.",
+            "type": "string"
+          }
+        },
+        "title": "NotificationConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Emits a notification for the run view and subscribers.",
+      "display_name": "Notification",
+      "docs": "v1 delivers notifications inside the run and its SSE stream; external channels are out of scope.",
+      "icon": "notifications",
+      "id": "notification",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [
+        "write:run_output"
+      ],
+      "category": "output",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Run output configuration.",
+        "properties": {
+          "value": {
+            "default": null,
+            "description": "Output value: literal or expression object."
+          }
+        },
+        "title": "RunOutputConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Sets the final output of the run.",
+      "display_name": "Run output",
+      "docs": "If multiple run output nodes fire, the last completed one wins and a warning is logged.",
+      "icon": "output",
+      "id": "run_output",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "error",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Status configuration.",
+        "properties": {
+          "node_ids": {
+            "default": [],
+            "description": "Selected node ids.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "default": "flow",
+            "description": "`flow` or `selected`.",
+            "type": "string"
+          }
+        },
+        "title": "StatusConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Receives status events from nodes in its scope.",
+      "display_name": "Status",
+      "docs": "Informational: a status node does not change the run status.",
+      "icon": "monitor_heart",
+      "id": "status",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "flow",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Subflow configuration.",
+        "properties": {
+          "subflow_id": {
+            "description": "Referenced subflow id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subflow_id"
+        ],
+        "title": "SubflowConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Runs a reusable flow fragment as a node.",
+      "display_name": "Subflow",
+      "docs": "The runtime expands the subflow with its own flow context and forwards its output.",
+      "icon": "account_tree",
+      "id": "subflow",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [],
+      "category": "flow",
+      "config_schema": {
+        "$defs": {
+          "SwitchRule": {
+            "description": "One switch rule.",
+            "properties": {
+              "operator": {
+                "description": "`eq`, `neq`, `lt`, `lte`, `gt`, `gte`, `contains`, `regex`,\n`is_null`, `is_not_null`.",
+                "type": "string"
+              },
+              "output": {
+                "description": "Output port name.",
+                "type": "string"
+              },
+              "value": {
+                "default": null,
+                "description": "Comparison value."
+              }
+            },
+            "required": [
+              "operator",
+              "output"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Switch configuration.",
+        "properties": {
+          "check_all": {
+            "default": false,
+            "description": "Send to every matching output.",
+            "type": "boolean"
+          },
+          "default_output": {
+            "default": "default",
+            "description": "Default output when no rule matches.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "property": {
+            "default": "msg.payload",
+            "description": "Property path or expression object."
+          },
+          "rules": {
+            "description": "Ordered rules.",
+            "items": {
+              "$ref": "#/$defs/SwitchRule"
+            },
+            "type": "array"
+          }
+        },
+        "title": "SwitchConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Routes a message to one or more outputs according to ordered rules.",
+      "display_name": "Switch",
+      "docs": "Rules are evaluated in order. `check_all` allows a message to reach multiple matching outputs.",
+      "icon": "call_split",
+      "id": "switch",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        },
+        {
+          "label": "Default",
+          "name": "default"
+        }
+      ],
+      "version": 1
+    },
+    {
+      "capabilities": [
+        "read:context"
+      ],
+      "category": "transform",
+      "config_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Transform configuration.",
+        "properties": {
+          "expression": {
+            "default": null,
+            "description": "lx_engine rule, path, or template."
+          },
+          "mapping": {
+            "default": null,
+            "description": "JSON mapping whose values are literals or expression objects."
+          }
+        },
+        "title": "TransformConfig",
+        "type": "object"
+      },
+      "deprecated": false,
+      "description": "Builds a new payload with an lx_engine expression or a JSON mapping.",
+      "display_name": "Transform",
+      "docs": "Mapping values may use ${...} templates or expression objects.",
+      "icon": "transform",
+      "id": "transform",
+      "input": {
+        "label": "Input",
+        "name": "in"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "outputs": [
+        {
+          "label": "Output",
+          "name": "out"
+        }
+      ],
+      "version": 1
+    }
+  ],
+  "schema_version": 1
+}

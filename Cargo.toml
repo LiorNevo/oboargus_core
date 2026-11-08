@@ -12,14 +12,33 @@ rust_decimal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "chrono", "rust_decimal", "uuid", "macros", "migrate"] }
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
-uuid = { version = "1.18", features = ["v4", "serde"] }
-thiserror = "2.0"
-async-trait = "0.1"
-futures = "0.3"
+sqlx = { version = "0.9.0", default-features = false, features = [
+  "postgres",
+  "runtime-tokio",
+  "chrono",
+  "rust_decimal",
+  "uuid",
+  "macros",
+  "migrate",
+] }
+tokio = { version = "1.54.1", features = [
+  "macros",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+uuid = { version = "1.29.1", features = ["v4", "serde"] }
+thiserror = "2.0.21"
+async-trait = "0.1.92"
+futures = "0.3.34"
 tracing.workspace = true
 utoipa = { workspace = true, optional = true }
+schemars = "1.2.3"
+jsonschema = "0.60.2"
+regex = "1.13.1"
+tokio-util = "0.7.20"
+cron = "0.17.0"
+chrono-tz = "0.10.4"
 
 [features]
 openapi = ["dep:utoipa"]
@@ -29,11 +48,11 @@ openapi = ["dep:utoipa"]
 # These mirror the regular dependencies above and add nothing to the
 # release build.
 [dev-dependencies]
-async-trait = "0.1"
-jsonschema = "0.60"
+async-trait = "0.1.92"
+jsonschema = "0.60.2"
 chrono.workspace = true
 rust_decimal.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
-uuid = { version = "1.18", features = ["v4", "serde"] }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.29.1", features = ["v4", "serde"] }

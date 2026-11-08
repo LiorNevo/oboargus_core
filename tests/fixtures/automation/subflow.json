@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "name": "Subflow instance",
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "inject",
+      "type_version": 1,
+      "config": {
+        "repeat": "none",
+        "once": true
+      }
+    },
+    {
+      "id": "n2",
+      "type": "subflow",
+      "type_version": 1,
+      "config": {
+        "subflow_id": "sf1"
+      }
+    },
+    {
+      "id": "n3",
+      "type": "debug",
+      "type_version": 1,
+      "config": {
+        "target": "msg"
+      }
+    }
+  ],
+  "wires": [
+    {
+      "id": "w1",
+      "source": "n1",
+      "source_port": "out",
+      "target": "n2",
+      "target_port": "in"
+    },
+    {
+      "id": "w2",
+      "source": "n2",
+      "source_port": "out",
+      "target": "n3",
+      "target_port": "in"
+    }
+  ],
+  "subflows": [
+    {
+      "id": "sf1",
+      "name": "Echo",
+      "inputs": [
+        {
+          "id": "in",
+          "label": "Input"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "out",
+          "label": "Output"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "in",
+          "type": "subflow_input",
+          "type_version": 1
+        },
+        {
+          "id": "s1",
+          "type": "change",
+          "type_version": 1,
+          "config": {
+            "rules": []
+          }
+        },
+        {
+          "id": "out",
+          "type": "subflow_output",
+          "type_version": 1
+        }
+      ],
+      "wires": [
+        {
+          "id": "sw1",
+          "source": "in",
+          "source_port": "out",
+          "target": "s1",
+          "target_port": "in"
+        },
+        {
+          "id": "sw2",
+          "source": "s1",
+          "source_port": "out",
+          "target": "out",
+          "target_port": "in"
+        }
+      ]
+    }
+  ]
+}

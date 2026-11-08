@@ -27,3 +27,15 @@ Operational rules for contributors and AI agents working in this crate.
   `scripts/schema.sh --update` and commit
   `schema/system-data-dictionary.json`. Promote the baseline only after a
   deliberate `x-obolargus-schema-version` bump.
+
+## Automation (spec 030)
+
+- The canonical flow document, validation, expression adapter, node registry,
+  message runtime, subflows/context, and persistence queries live in
+  `src/automation/`.
+- Add a node type by implementing `WorkflowNode`, registering it in
+  `default_registry()`, and regenerating
+  `schema/automation-node-types.json`:
+  `cargo test -p obolargus-core --test automation_nodes -- --ignored regenerate_node_type_catalog_fixture`.
+- Runtime tests live in `tests/automation_*.rs`; keep retries, error policies,
+  catch/status/complete routing, caps, and redaction covered.

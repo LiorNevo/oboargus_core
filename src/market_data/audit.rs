@@ -30,7 +30,7 @@ pub struct RefreshRunRow {
     pub started_at: DateTime<Utc>,
     /// Run ended at (`None` while in flight).
     pub ended_at: Option<DateTime<Utc>>,
-    /// Trigger label: `"scheduler"`, `"api"`, `"cli"`, or `"test"`.
+    /// Trigger label: `"scheduler"`, `"api"`, `"cli"`, `"automation"`, or `"test"`.
     pub trigger: String,
     /// Total assets the run touched.
     ///
@@ -233,7 +233,7 @@ pub struct LoadRunRow {
     pub started_at: DateTime<Utc>,
     /// Run ended at (`None` while in flight).
     pub ended_at: Option<DateTime<Utc>>,
-    /// Trigger label: `"cli"`, `"api"`, or `"test"`.
+    /// Trigger label: `"cli"`, `"api"`, `"automation"`, or `"test"`.
     pub trigger: String,
     /// The caller's named preferred source id (`None` when unnamed).
     ///

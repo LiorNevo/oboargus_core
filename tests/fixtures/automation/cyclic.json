@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "Cyclic flow",
+  "nodes": [
+    { "id": "n1", "type": "inject", "type_version": 1, "config": { "repeat": "none", "once": true } },
+    { "id": "n2", "type": "change", "type_version": 1, "config": { "rules": [] } },
+    { "id": "n3", "type": "log", "type_version": 1, "config": { "level": "info", "message": "tick" } }
+  ],
+  "wires": [
+    { "id": "w1", "source": "n1", "source_port": "out", "target": "n2", "target_port": "in" },
+    { "id": "w2", "source": "n2", "source_port": "out", "target": "n3", "target_port": "in" },
+    { "id": "w3", "source": "n3", "source_port": "out", "target": "n2", "target_port": "in" }
+  ],
+  "subflows": []
+}
