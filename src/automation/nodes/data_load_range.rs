@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::automation::error::NodeExecutionError;
-use crate::automation::nodes::common::{descriptor, input_port, output_port};
+use crate::automation::nodes::common::{
+    configure_field, configure_title, descriptor, input_port, output_port,
+};
 use crate::automation::nodes::{NodeCategory, NodeContext, NodeOutput, WorkflowNode};
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::load_range::{
@@ -59,7 +61,7 @@ pub struct DataLoadRangeNode;
 #[async_trait]
 impl WorkflowNode for DataLoadRangeNode {
     fn descriptor(&self) -> crate::automation::nodes::NodeTypeDescriptor {
-        descriptor::<DataLoadRangeConfig>(
+        let mut descriptor = descriptor::<DataLoadRangeConfig>(
             "data_load_range",
             1,
             NodeCategory::Data,
@@ -72,8 +74,24 @@ impl WorkflowNode for DataLoadRangeNode {
                 "read:market_data".to_string(),
                 "write:reference_data".to_string(),
             ],
-            "Calls the existing range load operation with one registry snapshot and per-date cancellation.",
-        )
+            "Loads reference data for a batch of identifiers over a date range using one registry snapshot with per-date cancellation.\n\nPer-identifier and per-date failures are outcomes, not node failures. Inspect the report for counters and failures.",
+        );
+        configure_field(
+            &mut descriptor,
+            "identifiers",
+            "IdentifierBatch",
+            "Identifiers",
+        );
+        configure_field(&mut descriptor, "from", "DateOrExpression", "From date");
+        configure_field(&mut descriptor, "to", "DateOrExpression", "To date");
+        configure_field(
+            &mut descriptor,
+            "preferred_source",
+            "SourceSelect",
+            "Preferred source",
+        );
+        configure_title(&mut descriptor, "default_currency", "Default currency");
+        descriptor
     }
 
     async fn execute(&self, ctx: NodeContext<'_>) -> Result<NodeOutput, NodeExecutionError> {

@@ -31,7 +31,7 @@ impl WorkflowNode for SubflowNode {
             Some(input_port()),
             vec![output_port()],
             Vec::new(),
-            "The runtime expands the subflow with its own flow context and forwards its output.",
+            "Runs a reusable flow fragment as a node.\n\nThe runtime expands the subflow with its own flow context and forwards its output.",
         )
     }
 

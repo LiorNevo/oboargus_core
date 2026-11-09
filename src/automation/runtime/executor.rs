@@ -182,15 +182,41 @@ impl<'a> Execution<'a> {
     async fn run(&mut self, context: &ContextStore) -> RunOutcome {
         let flow = self.flow;
         let mut queue: VecDeque<(String, MessageEnvelope)> = VecDeque::new();
-        for node in &flow.nodes {
-            if node.node_type == "inject" {
-                queue.push_back((node.id.clone(), MessageEnvelope::new(json!({}))));
+        if let Some(trigger_node_id) = self.run.trigger_node_id.as_deref() {
+            let Some(node) = flow.nodes.iter().find(|node| node.id == trigger_node_id) else {
+                return RunOutcome {
+                    status: RunStatus::Failed,
+                    outputs: json!({}),
+                    messages_total: 0,
+                    error: Some(json!({
+                        "code": "run.start_node_missing",
+                        "message": format!("start node '{trigger_node_id}' was not found in the published flow")
+                    })),
+                };
+            };
+            if node.node_type != "inject" {
+                return RunOutcome {
+                    status: RunStatus::Failed,
+                    outputs: json!({}),
+                    messages_total: 0,
+                    error: Some(json!({
+                        "code": "run.start_node_invalid",
+                        "message": format!("start node '{trigger_node_id}' is not an inject node")
+                    })),
+                };
             }
-        }
-        if queue.is_empty() {
+            queue.push_back((node.id.clone(), MessageEnvelope::new(json!({}))));
+        } else {
             for node in &flow.nodes {
-                if node.node_type == "data_load" || node.node_type == "data_load_range" {
+                if node.node_type == "inject" {
                     queue.push_back((node.id.clone(), MessageEnvelope::new(json!({}))));
+                }
+            }
+            if queue.is_empty() {
+                for node in &flow.nodes {
+                    if node.node_type == "data_load" || node.node_type == "data_load_range" {
+                        queue.push_back((node.id.clone(), MessageEnvelope::new(json!({}))));
+                    }
                 }
             }
         }

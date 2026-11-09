@@ -164,7 +164,7 @@ fn capability_allowlist_blocks_flows_that_need_denied_capabilities() {
                 "id": "n2",
                 "type": "data_load",
                 "type_version": 1,
-                "config": { "identifiers": [], "as_of_date": "2026-01-02", "dry_run": true }
+                "config": { "identifiers": [{ "scheme": "TICKER", "value": "XNAS:AAPL" }], "as_of_date": "2026-01-02", "dry_run": true }
             }
         ],
         "wires": [

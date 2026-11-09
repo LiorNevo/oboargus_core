@@ -68,3 +68,36 @@ pub fn with_payload(mut msg: Value, payload: Value) -> Value {
     }
     msg
 }
+
+/// Sets a human-readable title on one configuration property.
+pub fn configure_title(descriptor: &mut NodeTypeDescriptor, field: &str, title: &str) {
+    if let Some(properties) = descriptor
+        .config_schema
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        && let Some(entry) = properties.get_mut(field).and_then(Value::as_object_mut)
+    {
+        entry.insert("title".to_string(), json!(title));
+    }
+}
+
+/// Annotates one configuration property with a SchemaForm component and title.
+pub fn configure_field(
+    descriptor: &mut NodeTypeDescriptor,
+    field: &str,
+    component: &str,
+    title: &str,
+) {
+    let Some(properties) = descriptor
+        .config_schema
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(entry) = properties.get_mut(field).and_then(Value::as_object_mut) else {
+        return;
+    };
+    entry.insert("x-component".to_string(), json!(component));
+    entry.insert("title".to_string(), json!(title));
+}

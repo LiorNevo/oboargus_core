@@ -23,6 +23,27 @@ fn document_round_trips_unchanged() {
 }
 
 #[test]
+fn fractional_canvas_positions_are_accepted() {
+    // React Flow stores positions as fractional values after dragging and
+    // zooming; the canonical document must accept them as-is.
+    let text = r#"{
+        "schema_version": 1,
+        "name": "fractional",
+        "nodes": [{
+            "id": "n1",
+            "type": "inject",
+            "type_version": 1,
+            "position": { "x": 7.8888888888889, "y": 174.84722222222223 }
+        }],
+        "wires": []
+    }"#;
+    let document: FlowDocument =
+        serde_json::from_str(text).expect("fractional positions should deserialize");
+    assert!((document.nodes[0].position.x - 7.8888888888889).abs() < f64::EPSILON);
+    assert!((document.nodes[0].position.y - 174.84722222222223).abs() < f64::EPSILON);
+}
+
+#[test]
 fn schema_is_generated_and_versioned() {
     let schema = flow_schema();
     assert_eq!(schema["title"], "FlowDocument");
@@ -199,6 +220,29 @@ fn unknown_versions_and_invalid_triggers_are_reported() {
             .errors
             .iter()
             .any(|finding| finding.code == "flow.trigger_invalid"),
+        "{:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn data_load_nodes_need_identifiers_and_dates() {
+    let mut flow = fixture("data-loading");
+    flow.nodes[1].config = serde_json::json!({});
+    let report = validate_flow(&flow, &default_registry());
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|finding| finding.message.contains("needs identifiers")),
+        "{:?}",
+        report.errors
+    );
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|finding| finding.message.contains("needs 'as_of_date'")),
         "{:?}",
         report.errors
     );

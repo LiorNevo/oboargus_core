@@ -33,7 +33,7 @@
       "deprecated": false,
       "description": "Receives node errors in its scope and routes them to a recovery path.",
       "display_name": "Catch",
-      "docs": "The input message carries error.source, error.code, error.message, and error.retry_count.",
+      "docs": "Receives errors from nodes in its scope and routes them to a recovery path.\n\nThe input message carries `error.source`, `error.code`, `error.message`, and `error.retry_count`.",
       "icon": "error",
       "id": "catch",
       "input": {
@@ -131,7 +131,7 @@
       "deprecated": false,
       "description": "Sets, changes, or deletes message properties and run/flow/global context values.",
       "display_name": "Change",
-      "docs": "Context writes are atomic per key and last-write-wins under concurrent runs.",
+      "docs": "Applies ordered set, change, and delete operations to message properties or run/flow/global context values.\n\nExpressions are resolved for each message. Context writes are atomic per key and last-write-wins under concurrent runs.",
       "icon": "edit",
       "id": "change",
       "input": {
@@ -176,7 +176,7 @@
       "deprecated": false,
       "description": "Receives successful-completion events from nodes in its scope.",
       "display_name": "Complete",
-      "docs": "Informational: a complete node does not change the run status.",
+      "docs": "Receives successful-completion events from nodes in its scope.\n\nThis is informational: a complete node does not change the run status.",
       "icon": "task_alt",
       "id": "complete",
       "input": {
@@ -206,7 +206,9 @@
         "properties": {
           "as_of_date": {
             "default": "",
-            "description": "ISO date or expression object."
+            "description": "ISO date or expression object.",
+            "title": "As of date",
+            "x-component": "DateOrExpression"
           },
           "create_missing_assets": {
             "default": false,
@@ -216,6 +218,7 @@
           "default_currency": {
             "default": "USD",
             "description": "Default currency for created assets.",
+            "title": "Default currency",
             "type": "string"
           },
           "dry_run": {
@@ -225,15 +228,19 @@
           },
           "identifiers": {
             "default": [],
-            "description": "Identifier array or expression object."
+            "description": "Identifier array or expression object.",
+            "title": "Identifiers",
+            "x-component": "IdentifierBatch"
           },
           "preferred_source": {
             "default": null,
             "description": "Preferred source id.",
+            "title": "Preferred source",
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "x-component": "SourceSelect"
           }
         },
         "title": "DataLoadConfig",
@@ -242,7 +249,7 @@
       "deprecated": false,
       "description": "Loads reference data for a batch of identifiers on one date.",
       "display_name": "Load reference data",
-      "docs": "Calls the existing single-date load operation. Per-identifier failures are outcomes, not node failures.",
+      "docs": "Loads reference data for a batch of identifiers on a single date using the existing data-load operation and one registry snapshot.\n\nPer-identifier failures are outcomes, not node failures. Inspect the run report for loaded, no-op, and per-identifier statuses.",
       "icon": "database",
       "id": "data_load",
       "input": {
@@ -285,6 +292,7 @@
           "default_currency": {
             "default": "USD",
             "description": "Default currency for created assets.",
+            "title": "Default currency",
             "type": "string"
           },
           "dry_run": {
@@ -294,23 +302,31 @@
           },
           "from": {
             "default": "",
-            "description": "First date (inclusive)."
+            "description": "First date (inclusive).",
+            "title": "From date",
+            "x-component": "DateOrExpression"
           },
           "identifiers": {
             "default": [],
-            "description": "Identifier array or expression object."
+            "description": "Identifier array or expression object.",
+            "title": "Identifiers",
+            "x-component": "IdentifierBatch"
           },
           "preferred_source": {
             "default": null,
             "description": "Preferred source id.",
+            "title": "Preferred source",
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "x-component": "SourceSelect"
           },
           "to": {
             "default": "",
-            "description": "Last date (inclusive)."
+            "description": "Last date (inclusive).",
+            "title": "To date",
+            "x-component": "DateOrExpression"
           }
         },
         "title": "DataLoadRangeConfig",
@@ -319,7 +335,7 @@
       "deprecated": false,
       "description": "Loads reference data for a batch of identifiers over a date range.",
       "display_name": "Load reference data range",
-      "docs": "Calls the existing range load operation with one registry snapshot and per-date cancellation.",
+      "docs": "Loads reference data for a batch of identifiers over a date range using one registry snapshot with per-date cancellation.\n\nPer-identifier and per-date failures are outcomes, not node failures. Inspect the report for counters and failures.",
       "icon": "date_range",
       "id": "data_load_range",
       "input": {
@@ -370,8 +386,8 @@
       "deprecated": false,
       "description": "Displays a message in the debug sidebar and/or the run log.",
       "display_name": "Debug",
-      "docs": "A sink node for inspecting messages. It never changes the message or the run status.",
-      "icon": "bug",
+      "docs": "A sink node for inspecting messages. Choose the whole message, its payload, or an expression; optionally also write the value to the run log.\n\nIt never changes the message or the run status.",
+      "icon": "bug_report",
       "id": "debug",
       "input": {
         "label": "Input",
@@ -423,7 +439,7 @@
       "deprecated": false,
       "description": "Delays or rate-limits messages.",
       "display_name": "Delay",
-      "docs": "Cancellation-aware. Rate limiting uses a bounded queue and fails with node.queue_full on overflow.",
+      "docs": "Waits a fixed number of seconds or rate-limits messages to a maximum per second.\n\nThe wait is cancellation-aware. Rate limiting uses a bounded queue and fails with `node.queue_full` if it overflows.",
       "icon": "schedule",
       "id": "delay",
       "input": {
@@ -502,7 +518,7 @@
       "deprecated": false,
       "description": "Emits a configured message manually, on an interval, or on a cron schedule.",
       "display_name": "Inject",
-      "docs": "Starts a flow with a configured payload. Repeating injects are reconciled into durable triggers on publish.",
+      "docs": "Emits one message with a configured payload and a generated `_msgid`. Payload types include none, string, number, boolean, JSON, and timestamp.\n\nRun it manually with the button on the left of the node. Repeating injects are reconciled into durable triggers when the flow is published; use `once` to fire when a run starts, or `repeat` with an interval or cron schedule.",
       "icon": "bolt",
       "id": "inject",
       "output_schema": {
@@ -540,7 +556,7 @@
       "deprecated": false,
       "description": "Writes a structured entry to the run log.",
       "display_name": "Log",
-      "docs": "Message templates use ${...} expressions. Secrets are redacted by the runtime.",
+      "docs": "Writes a structured entry to the run log.\n\nMessage templates use ${...} expressions. Secrets are redacted by the runtime.",
       "icon": "article",
       "id": "log",
       "input": {
@@ -582,7 +598,7 @@
       "deprecated": false,
       "description": "Emits a notification for the run view and subscribers.",
       "display_name": "Notification",
-      "docs": "v1 delivers notifications inside the run and its SSE stream; external channels are out of scope.",
+      "docs": "Emits a notification for the run view and its SSE stream.\n\nv1 keeps notifications inside the run; external channels are out of scope.",
       "icon": "notifications",
       "id": "notification",
       "input": {
@@ -620,7 +636,7 @@
       "deprecated": false,
       "description": "Sets the final output of the run.",
       "display_name": "Run output",
-      "docs": "If multiple run output nodes fire, the last completed one wins and a warning is logged.",
+      "docs": "Sets the final output of the run.\n\nIf multiple run output nodes fire, the last completed one wins and a warning is logged.",
       "icon": "output",
       "id": "run_output",
       "input": {
@@ -660,7 +676,7 @@
       "deprecated": false,
       "description": "Receives status events from nodes in its scope.",
       "display_name": "Status",
-      "docs": "Informational: a status node does not change the run status.",
+      "docs": "Receives status events from nodes in its scope.\n\nThis is informational: a status node does not change the run status.",
       "icon": "monitor_heart",
       "id": "status",
       "input": {
@@ -699,7 +715,7 @@
       "deprecated": false,
       "description": "Runs a reusable flow fragment as a node.",
       "display_name": "Subflow",
-      "docs": "The runtime expands the subflow with its own flow context and forwards its output.",
+      "docs": "Runs a reusable flow fragment as a node.\n\nThe runtime expands the subflow with its own flow context and forwards its output.",
       "icon": "account_tree",
       "id": "subflow",
       "input": {
@@ -779,7 +795,7 @@
       "deprecated": false,
       "description": "Routes a message to one or more outputs according to ordered rules.",
       "display_name": "Switch",
-      "docs": "Rules are evaluated in order. `check_all` allows a message to reach multiple matching outputs.",
+      "docs": "Routes a message to one or more output ports according to ordered rules.\n\nRules are evaluated in order. `check_all` lets one message reach multiple matching outputs; otherwise routing stops at the first match.",
       "icon": "call_split",
       "id": "switch",
       "input": {
@@ -825,7 +841,7 @@
       "deprecated": false,
       "description": "Builds a new payload with an lx_engine expression or a JSON mapping.",
       "display_name": "Transform",
-      "docs": "Mapping values may use ${...} templates or expression objects.",
+      "docs": "Builds a new message payload from an lx_engine expression or a JSON mapping.\n\nMapping values may use ${...} templates or expression objects. If neither is configured, the incoming payload is passed through.",
       "icon": "transform",
       "id": "transform",
       "input": {

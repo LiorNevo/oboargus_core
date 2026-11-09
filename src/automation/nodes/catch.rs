@@ -46,7 +46,7 @@ impl WorkflowNode for CatchNode {
             Some(input_port()),
             vec![output_port()],
             Vec::new(),
-            "The input message carries error.source, error.code, error.message, and error.retry_count.",
+            "Receives errors from nodes in its scope and routes them to a recovery path.\n\nThe input message carries `error.source`, `error.code`, `error.message`, and `error.retry_count`.",
         )
     }
 

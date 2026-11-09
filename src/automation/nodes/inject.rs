@@ -62,7 +62,7 @@ impl WorkflowNode for InjectNode {
             None,
             vec![output_port()],
             Vec::new(),
-            "Starts a flow with a configured payload. Repeating injects are reconciled into durable triggers on publish.",
+            "Emits one message with a configured payload and a generated `_msgid`. Payload types include none, string, number, boolean, JSON, and timestamp.\n\nRun it manually with the button on the left of the node. Repeating injects are reconciled into durable triggers when the flow is published; use `once` to fire when a run starts, or `repeat` with an interval or cron schedule.",
         )
     }
 

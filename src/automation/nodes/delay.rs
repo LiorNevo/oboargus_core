@@ -51,7 +51,7 @@ impl WorkflowNode for DelayNode {
             Some(input_port()),
             vec![output_port()],
             Vec::new(),
-            "Cancellation-aware. Rate limiting uses a bounded queue and fails with node.queue_full on overflow.",
+            "Waits a fixed number of seconds or rate-limits messages to a maximum per second.\n\nThe wait is cancellation-aware. Rate limiting uses a bounded queue and fails with `node.queue_full` if it overflows.",
         )
     }
 

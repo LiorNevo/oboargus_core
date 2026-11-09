@@ -65,7 +65,7 @@ impl WorkflowNode for SwitchNode {
             Some(input_port()),
             outputs,
             Vec::new(),
-            "Rules are evaluated in order. `check_all` allows a message to reach multiple matching outputs.",
+            "Routes a message to one or more output ports according to ordered rules.\n\nRules are evaluated in order. `check_all` lets one message reach multiple matching outputs; otherwise routing stops at the first match.",
         )
     }
 

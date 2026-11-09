@@ -58,7 +58,7 @@ impl WorkflowNode for ChangeNode {
             Some(input_port()),
             vec![output_port()],
             vec!["read:context".to_string(), "write:context".to_string()],
-            "Context writes are atomic per key and last-write-wins under concurrent runs.",
+            "Applies ordered set, change, and delete operations to message properties or run/flow/global context values.\n\nExpressions are resolved for each message. Context writes are atomic per key and last-write-wins under concurrent runs.",
         )
     }
 

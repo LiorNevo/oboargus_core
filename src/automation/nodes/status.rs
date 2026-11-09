@@ -43,7 +43,7 @@ impl WorkflowNode for StatusNode {
             Some(input_port()),
             vec![output_port()],
             Vec::new(),
-            "Informational: a status node does not change the run status.",
+            "Receives status events from nodes in its scope.\n\nThis is informational: a status node does not change the run status.",
         )
     }
 

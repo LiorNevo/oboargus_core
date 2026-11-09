@@ -7,7 +7,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::automation::error::NodeExecutionError;
-use crate::automation::nodes::common::{descriptor, input_port, output_port};
+use crate::automation::nodes::common::{
+    configure_field, configure_title, descriptor, input_port, output_port,
+};
 use crate::automation::nodes::{NodeCategory, NodeContext, NodeOutput, WorkflowNode};
 use crate::market_data::load::{IdentifierLoadConfig, run_identifier_load};
 use crate::market_data::types::TypedIdentifier;
@@ -49,7 +51,7 @@ pub struct DataLoadNode;
 #[async_trait]
 impl WorkflowNode for DataLoadNode {
     fn descriptor(&self) -> crate::automation::nodes::NodeTypeDescriptor {
-        descriptor::<DataLoadConfig>(
+        let mut descriptor = descriptor::<DataLoadConfig>(
             "data_load",
             1,
             NodeCategory::Data,
@@ -62,8 +64,28 @@ impl WorkflowNode for DataLoadNode {
                 "read:market_data".to_string(),
                 "write:reference_data".to_string(),
             ],
-            "Calls the existing single-date load operation. Per-identifier failures are outcomes, not node failures.",
-        )
+            "Loads reference data for a batch of identifiers on a single date using the existing data-load operation and one registry snapshot.\n\nPer-identifier failures are outcomes, not node failures. Inspect the run report for loaded, no-op, and per-identifier statuses.",
+        );
+        configure_field(
+            &mut descriptor,
+            "identifiers",
+            "IdentifierBatch",
+            "Identifiers",
+        );
+        configure_field(
+            &mut descriptor,
+            "as_of_date",
+            "DateOrExpression",
+            "As of date",
+        );
+        configure_field(
+            &mut descriptor,
+            "preferred_source",
+            "SourceSelect",
+            "Preferred source",
+        );
+        configure_title(&mut descriptor, "default_currency", "Default currency");
+        descriptor
     }
 
     async fn execute(&self, ctx: NodeContext<'_>) -> Result<NodeOutput, NodeExecutionError> {

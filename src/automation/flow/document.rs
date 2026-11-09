@@ -164,14 +164,15 @@ impl FlowNode {
 }
 
 /// Canvas position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct NodePosition {
-    /// X coordinate.
+    /// X coordinate. Canvas coordinates are floating point because the
+    /// editor's drag and zoom transforms produce fractional values.
     #[serde(default)]
-    pub x: i32,
+    pub x: f64,
     /// Y coordinate.
     #[serde(default)]
-    pub y: i32,
+    pub y: f64,
 }
 
 /// Retry policy.

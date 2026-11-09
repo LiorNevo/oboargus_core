@@ -269,6 +269,83 @@ fn validate_node(
     }
     validate_trigger(node, report);
     validate_config(node, &descriptor.config_schema, report);
+    validate_data_load_config(node, report);
+}
+
+fn has_identifiers(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(map)) => !map.is_empty(),
+        _ => false,
+    }
+}
+
+fn has_date_expression(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Object(map)) => !map.is_empty(),
+        _ => false,
+    }
+}
+
+fn validate_data_load_config(
+    node: &crate::automation::flow::document::FlowNode,
+    report: &mut ValidationReport,
+) {
+    let date_fields: &[&str] = match node.node_type.as_str() {
+        "data_load" => &["as_of_date"],
+        "data_load_range" => &["from", "to"],
+        _ => return,
+    };
+    if !has_identifiers(node.config.get("identifiers")) {
+        report.push_error(
+            FlowValidationFinding::error(
+                "node.config_invalid",
+                format!(
+                    "data-load node '{}' needs identifiers (a non-empty array or an expression object)",
+                    node.id
+                ),
+            )
+            .with_node(&node.id),
+        );
+    }
+    for field in date_fields {
+        if !has_date_expression(node.config.get(*field)) {
+            report.push_error(
+                FlowValidationFinding::error(
+                    "node.config_invalid",
+                    format!(
+                        "data-load node '{}' needs '{}' (an ISO date or an expression object)",
+                        node.id, field
+                    ),
+                )
+                .with_node(&node.id),
+            );
+        }
+    }
+    let creates_assets = node
+        .config
+        .get("create_missing_assets")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if creates_assets
+        && !node
+            .config
+            .get("default_currency")
+            .and_then(Value::as_str)
+            .is_some_and(|currency| !currency.trim().is_empty())
+    {
+        report.push_error(
+            FlowValidationFinding::error(
+                "node.config_invalid",
+                format!(
+                    "data-load node '{}' needs a default_currency when create_missing_assets is enabled",
+                    node.id
+                ),
+            )
+            .with_node(&node.id),
+        );
+    }
 }
 
 fn validate_trigger(

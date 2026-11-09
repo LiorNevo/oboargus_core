@@ -43,7 +43,7 @@ impl WorkflowNode for LogNode {
             Some(input_port()),
             vec![output_port()],
             Vec::new(),
-            "Message templates use ${...} expressions. Secrets are redacted by the runtime.",
+            "Writes a structured entry to the run log.\n\nMessage templates use ${...} expressions. Secrets are redacted by the runtime.",
         )
     }
 

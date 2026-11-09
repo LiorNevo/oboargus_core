@@ -184,6 +184,84 @@ async fn cancellation_stops_the_run() {
 }
 
 #[tokio::test]
+async fn run_from_inject_node_only_executes_that_branch() {
+    let flow: FlowDocument = serde_json::from_value(json!({
+        "schema_version": 1,
+        "name": "start-node",
+        "nodes": [
+            { "id": "n1", "type": "inject", "type_version": 1, "config": { "payload_type": "string", "payload": "first", "repeat": "none", "once": true } },
+            { "id": "n2", "type": "debug", "type_version": 1, "config": { "target": "msg" } },
+            { "id": "n3", "type": "inject", "type_version": 1, "config": { "payload_type": "string", "payload": "second", "repeat": "none", "once": true } },
+            { "id": "n4", "type": "debug", "type_version": 1, "config": { "target": "msg" } }
+        ],
+        "wires": [
+            { "id": "w1", "source": "n1", "source_port": "out", "target": "n2", "target_port": "in" },
+            { "id": "w2", "source": "n3", "source_port": "out", "target": "n4", "target_port": "in" }
+        ]
+    }))
+    .expect("flow");
+    let (registry, market_data) = registry_snapshot();
+    let collector = Collector::default();
+    let mut metadata = run_metadata(json!({}));
+    metadata.trigger_node_id = Some("n3".to_string());
+    let outcome = execute_flow(
+        &flow,
+        &registry,
+        metadata,
+        None,
+        &market_data,
+        CancellationToken::new(),
+        RunExecutionConfig::default(),
+        &collector,
+    )
+    .await;
+    assert_eq!(outcome.status, RunStatus::Succeeded);
+    assert_eq!(outcome.messages_total, 2);
+    let started = collector.started.lock().expect("started");
+    let nodes: Vec<&str> = started.iter().map(|(node, _)| node.as_str()).collect();
+    assert!(!nodes.contains(&"n1"));
+    assert!(!nodes.contains(&"n2"));
+    assert!(nodes.contains(&"n3"));
+    assert!(nodes.contains(&"n4"));
+    let messages = collector.messages.lock().expect("messages");
+    assert!(messages.iter().any(|(node, _, value)| {
+        node == "n3" && value["payload"] == json!("second")
+    }));
+}
+
+#[tokio::test]
+async fn run_from_missing_inject_node_fails_explicitly() {
+    let flow: FlowDocument = serde_json::from_value(json!({
+        "schema_version": 1,
+        "name": "missing-start-node",
+        "nodes": [
+            { "id": "n1", "type": "inject", "type_version": 1, "config": { "repeat": "none", "once": true } }
+        ],
+        "wires": []
+    }))
+    .expect("flow");
+    let (registry, market_data) = registry_snapshot();
+    let mut metadata = run_metadata(json!({}));
+    metadata.trigger_node_id = Some("nope".to_string());
+    let outcome = execute_flow(
+        &flow,
+        &registry,
+        metadata,
+        None,
+        &market_data,
+        CancellationToken::new(),
+        RunExecutionConfig::default(),
+        &NoopObserver,
+    )
+    .await;
+    assert_eq!(outcome.status, RunStatus::Failed);
+    assert_eq!(
+        outcome.error.expect("error")["code"],
+        "run.start_node_missing"
+    );
+}
+
+#[tokio::test]
 async fn duplicate_messages_are_cloned_per_wire() {
     let flow: FlowDocument = serde_json::from_value(json!({
         "schema_version": 1,

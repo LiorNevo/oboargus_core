@@ -43,7 +43,7 @@ impl WorkflowNode for NotificationNode {
             Some(input_port()),
             vec![output_port()],
             Vec::new(),
-            "v1 delivers notifications inside the run and its SSE stream; external channels are out of scope.",
+            "Emits a notification for the run view and its SSE stream.\n\nv1 keeps notifications inside the run; external channels are out of scope.",
         )
     }
 

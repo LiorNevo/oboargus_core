@@ -415,16 +415,12 @@ pub async fn publish_flow(
     .await
     .map_err(db_error)?;
 
-    sqlx::query("DELETE FROM automation_flow_versions WHERE id = $1")
-        .bind(draft_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
-
+    // Publishing creates an immutable snapshot. Keep the working draft in
+    // place so reopening the flow lands on the graph the author just
+    // published instead of an empty canvas. The draft revision is unchanged
+    // because the draft itself did not change.
     sqlx::query(
-        "UPDATE automation_flows SET current_draft_id = NULL, \
-             current_published_version_id = $2, draft_revision = draft_revision + 1, \
-             updated_at = NOW() \
+        "UPDATE automation_flows SET current_published_version_id = $2, updated_at = NOW() \
          WHERE id = $1",
     )
     .bind(flow_id)

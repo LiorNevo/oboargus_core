@@ -46,11 +46,11 @@ impl WorkflowNode for DebugNode {
             NodeCategory::Flow,
             "Debug",
             "Displays a message in the debug sidebar and/or the run log.",
-            "bug",
+            "bug_report",
             Some(input_port()),
             Vec::new(),
             Vec::new(),
-            "A sink node for inspecting messages. It never changes the message or the run status.",
+            "A sink node for inspecting messages. Choose the whole message, its payload, or an expression; optionally also write the value to the run log.\n\nIt never changes the message or the run status.",
         )
     }
 

@@ -43,7 +43,7 @@ impl WorkflowNode for CompleteNode {
             Some(input_port()),
             vec![output_port()],
             Vec::new(),
-            "Informational: a complete node does not change the run status.",
+            "Receives successful-completion events from nodes in its scope.\n\nThis is informational: a complete node does not change the run status.",
         )
     }
 

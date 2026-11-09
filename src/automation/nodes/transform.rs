@@ -35,7 +35,7 @@ impl WorkflowNode for TransformNode {
             Some(input_port()),
             vec![output_port()],
             vec!["read:context".to_string()],
-            "Mapping values may use ${...} templates or expression objects.",
+            "Builds a new message payload from an lx_engine expression or a JSON mapping.\n\nMapping values may use ${...} templates or expression objects. If neither is configured, the incoming payload is passed through.",
         )
     }
 

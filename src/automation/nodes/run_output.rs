@@ -39,7 +39,7 @@ impl WorkflowNode for RunOutputNode {
             Some(input_port()),
             Vec::new(),
             vec!["write:run_output".to_string()],
-            "If multiple run output nodes fire, the last completed one wins and a warning is logged.",
+            "Sets the final output of the run.\n\nIf multiple run output nodes fire, the last completed one wins and a warning is logged.",
         )
     }
 
