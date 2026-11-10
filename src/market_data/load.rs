@@ -701,19 +701,50 @@ async fn process_identifier(
     let asset = match resolved {
         Some(asset) => asset,
         None if !config.create_missing_assets => {
-            // No asset claims the identifier: the fetch registry is never
-            // consulted, so the line was not attempted (FR-003 / D13).
-            counters.not_resolved += 1;
-            return outcome_line(
-                identifier,
-                None,
-                false,
-                LoadOutcome::NotResolved,
-                None,
-                Vec::new(),
-                AssetCreation::NotRequested,
-                None,
-            );
+            // The exact `(scheme, value)` pair is unclaimed, but ticker
+            // identifiers name one instrument regardless of venue
+            // qualification or case (`TICKER:GOOGL`, `TICKER:XNAS:GOOGL`,
+            // `ticker:googl`). The identifier search and the creation path
+            // already apply that equivalence; resolution must too, or a
+            // search result marked "known" loads as `not_resolved`.
+            match find_equivalent_ticker_asset(pool, identifier).await {
+                Ok(EquivalentAsset::One(asset)) => asset,
+                Ok(_) => {
+                    // No asset claims the identifier: the fetch registry is
+                    // never consulted, so the line was not attempted
+                    // (FR-003 / D13). `Many` stays unresolved rather than
+                    // guessing which instrument was meant.
+                    counters.not_resolved += 1;
+                    return outcome_line(
+                        identifier,
+                        None,
+                        false,
+                        LoadOutcome::NotResolved,
+                        None,
+                        Vec::new(),
+                        AssetCreation::NotRequested,
+                        None,
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        identifier = ?identifier,
+                        error = %error,
+                        "equivalent ticker lookup failed"
+                    );
+                    counters.storage_failure += 1;
+                    return outcome_line(
+                        identifier,
+                        None,
+                        false,
+                        LoadOutcome::StorageFailure,
+                        None,
+                        Vec::new(),
+                        AssetCreation::NotRequested,
+                        None,
+                    );
+                }
+            }
         }
         None => {
             match find_equivalent_ticker_asset(pool, identifier).await {

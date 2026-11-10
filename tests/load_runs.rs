@@ -319,6 +319,46 @@ async fn unknown_identifier_is_not_resolved_and_others_still_load() {
     assert_eq!(count_rows(&pool, asset_id, date).await, 1);
 }
 
+/// A bare `TICKER` and a venue-qualified `TICKER:XNAS` name one instrument.
+/// Resolving the bare form against an asset stored under the venue-qualified
+/// form must load, not report `not_resolved` (the identifier search already
+/// labels that pairing "known").
+#[tokio::test]
+async fn bare_ticker_resolves_an_asset_stored_with_a_venue() {
+    let Some((pool, _guard)) = tx_pool().await else {
+        eprintln!("SKIPPED: no test database configured");
+        return;
+    };
+
+    let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("date");
+    let asset_id = seed_asset(&pool, "TICKER:XNAS", "GOOGL").await;
+
+    let mut provider = ScriptedProvider::new("yahoo_finance", &["TICKER", "TICKER:*"], 10);
+    provider.answers("TICKER:GOOGL", range_for("yahoo_finance", date));
+    let registry = DataSourceRegistry::new(vec![provider.into_arc()]).expect("registry");
+
+    let report = run_identifier_load(
+        Some(&pool),
+        &registry,
+        IdentifierLoadConfig {
+            identifiers: vec![TypedIdentifier::new("TICKER", "GOOGL")],
+            as_of_date: date,
+            preferred_source: None,
+            trigger: "test".into(),
+            dry_run: false,
+            create_missing_assets: false,
+            default_currency: obolargus_core::market_data::load::DEFAULT_ASSET_CURRENCY.to_string(),
+        },
+    )
+    .await
+    .expect("report");
+
+    assert_eq!(report.loaded, 1);
+    assert_eq!(report.not_resolved, 0);
+    assert_eq!(report.identifiers[0].asset_id, Some(asset_id));
+    assert_eq!(count_rows(&pool, asset_id, date).await, 1);
+}
+
 /// A same-day re-load reports `no_op` and stores nothing new.
 #[tokio::test]
 async fn same_day_reload_reports_no_op_and_stores_nothing() {
