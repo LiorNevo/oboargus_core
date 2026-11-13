@@ -224,9 +224,11 @@ async fn run_from_inject_node_only_executes_that_branch() {
     assert!(nodes.contains(&"n3"));
     assert!(nodes.contains(&"n4"));
     let messages = collector.messages.lock().expect("messages");
-    assert!(messages.iter().any(|(node, _, value)| {
-        node == "n3" && value["payload"] == json!("second")
-    }));
+    assert!(
+        messages
+            .iter()
+            .any(|(node, _, value)| { node == "n3" && value["payload"] == json!("second") })
+    );
 }
 
 #[tokio::test]
