@@ -46,6 +46,17 @@ pub const TABLES: &[&str] = &[
     "assets",
     "issuers",
     "portfolios",
+    // Automation tables (spec 030). Child rows first so the truncate
+    // stays correct even without `CASCADE`.
+    "automation_messages",
+    "automation_run_logs",
+    "automation_context",
+    "automation_node_runs",
+    "automation_audit_events",
+    "automation_runs",
+    "automation_triggers",
+    "automation_flow_versions",
+    "automation_flows",
 ];
 
 /// Tables counted by [`count_high_level_rows`]. Excludes the

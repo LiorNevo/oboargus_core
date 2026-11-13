@@ -525,6 +525,13 @@ impl<'a> Execution<'a> {
                     }
                 }
                 Err(error) => {
+                    if self.cancel.is_cancelled() {
+                        return Err(self.failure(
+                            RunStatus::Cancelled,
+                            "run.cancelled",
+                            "run cancelled",
+                        ));
+                    }
                     if !is_event_node(node) {
                         self.deliver_event(
                             nodes,

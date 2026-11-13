@@ -66,6 +66,18 @@ const TABLES: &[&str] = &[
     "assets",
     "issuers",
     "portfolios",
+    // Automation tables (spec 030). The automation integration tests
+    // create flows/runs with fixed names, so leaving these rows behind
+    // makes a second test run fail on the unique flow-name index.
+    "automation_messages",
+    "automation_run_logs",
+    "automation_context",
+    "automation_node_runs",
+    "automation_audit_events",
+    "automation_runs",
+    "automation_triggers",
+    "automation_flow_versions",
+    "automation_flows",
 ];
 
 /// Pick the test database URL from the two candidates, preferring

@@ -1,6 +1,7 @@
 //! Code-driven documentation artifacts for the automation catalog.
 //!
-//! The node-type catalog is generated from the live [`NodeRegistry`], so the
+//! The node-type catalog is generated from the live
+//! [`NodeRegistry`](crate::automation::nodes::NodeRegistry), so the
 //! checked-in fixture can never drift from the executable descriptors.
 
 use serde_json::Value;

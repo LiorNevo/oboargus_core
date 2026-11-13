@@ -1,6 +1,6 @@
 //! The system-wide data dictionary exported as one JSON Schema document.
 //!
-//! The document is generated from [`crate::domain::model_description`] and
+//! The document is generated from [`crate::domain::model_description()`] and
 //! [`crate::temporal::catalog`]. It is not a second source of truth: every
 //! entity, field, relationship, invariant, fact type, and fact field is
 //! projected from those authoritative descriptions.
