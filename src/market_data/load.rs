@@ -453,7 +453,7 @@ pub struct IdentifierLoadReport {
 
 /// The result of the store step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StoreOutcome {
+pub(crate) enum StoreOutcome {
     /// A row was written.
     Loaded,
     /// The identical fact was already known — nothing was written.
@@ -1481,7 +1481,22 @@ async fn store_bar(
         .await
         .map(|asset| asset.currency)
         .unwrap_or_else(|_| DEFAULT_ASSET_CURRENCY.to_string());
+    store_price_bar(pool, asset_id, bar, source_id, as_of_date, &currency).await
+}
 
+/// Stores one price bar using an already-resolved asset currency.
+///
+/// Shared by the single-date loader and the bounded history loader so both
+/// writes use the same fact shape and idempotency rule. The caller reads the
+/// asset once per run rather than once per bar.
+pub(crate) async fn store_price_bar(
+    pool: &sqlx::PgPool,
+    asset_id: AssetId,
+    bar: PriceBar,
+    source_id: &str,
+    as_of_date: NaiveDate,
+    currency: &str,
+) -> (StoreOutcome, Option<StoredFactDetail>) {
     let value = FactValue::MarketPrice(MarketPriceValue {
         open: bar.open,
         high: bar.high,
@@ -1489,7 +1504,7 @@ async fn store_bar(
         close: bar.close,
         adjclose: Some(bar.adjclose),
         volume: Some(rust_decimal::Decimal::from(bar.volume)),
-        currency,
+        currency: currency.to_string(),
         adjustment: Adjustment::Unadjusted,
     });
 
