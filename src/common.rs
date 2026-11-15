@@ -78,6 +78,17 @@ const TABLES: &[&str] = &[
     "automation_triggers",
     "automation_flow_versions",
     "automation_flows",
+    // Morpheus chat (spec 032). Children first.
+    "morpheus_observations",
+    "morpheus_approval_requests",
+    "morpheus_ui_actions",
+    "morpheus_tool_calls",
+    "morpheus_steps",
+    "morpheus_turns",
+    "morpheus_messages",
+    "morpheus_control_leases",
+    "morpheus_standing_approvals",
+    "morpheus_conversations",
 ];
 
 /// Pick the test database URL from the two candidates, preferring

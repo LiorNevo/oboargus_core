@@ -17,6 +17,9 @@ pub mod domain;
 /// Source-agnostic market data interface (see `specs/017-yahoo-data-source/spec.md`).
 pub mod market_data;
 
+/// Morpheus agent chat domain (see `specs/032-morpheus-agent-chat/spec.md`).
+pub mod morpheus;
+
 /// Bitemporal market data and the intraday time model.
 ///
 /// See `specs/021-bitemporal-market-data/spec.md`. Additive to [`domain`]:
