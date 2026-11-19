@@ -89,15 +89,15 @@ async fn cleanup_reports_and_returns_when_pool_begin_fails() {
 }
 
 #[tokio::test]
-async fn cleanup_continues_after_an_execute_failure_and_reports_a_commit_error() {
+async fn cleanup_falls_back_to_per_table_truncation_on_a_schema_less_database() {
     let Some(url) = test_url() else {
         return;
     };
     // Connect to a scratch database that does NOT have the high-level
-    // tables: every TRUNCATE statement fails, then we force COMMIT
-    // to fail by setting up a deferred check constraint violation
-    // (PostgreSQL returns COMMIT success on aborted transactions, so
-    // we need a real error at commit time).
+    // tables: the batched TRUNCATE fails, then the per-table fallback
+    // reports each missing relation without aborting the caller. A
+    // deferred-FK trigger on one of the tables also proves a failing
+    // per-table statement is reported and the loop continues.
     let scratch_url = url_for_scratch_db(&url).await;
     setup_commit_trap(&url).await;
     let pool = PgPool::connect(&scratch_url)

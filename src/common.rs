@@ -23,6 +23,13 @@
 //! requires separate test databases (the root `Makefile` uses its
 //! serial project loop for this reason).
 //!
+//! Migrations and the fact-catalog sync run **once per process** per
+//! database URL (they are idempotent and the tables they touch are not
+//! truncated), so the per-test fixture cost is a connection plus one
+//! multi-table `TRUNCATE`. A single `TRUNCATE` statement is an order of
+//! magnitude faster than one statement per table on the shared test
+//! database.
+//!
 //! The fixture connects to the **test** database (named by
 //! `TEST_DATABASE_URL`), NEVER the production database. The
 //! `db-cleanup` binary refuses to run against `DATABASE_URL`; this
@@ -40,6 +47,12 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 /// tests in parallel. The guard is held by [`PoolGuard`].
 static DB_TEST_LOCK: LazyLock<std::sync::Arc<Mutex<()>>> =
     LazyLock::new(|| std::sync::Arc::new(Mutex::new(())));
+
+/// The URL whose database has already been migrated and catalog-synced
+/// by this process. Guarded by [`DB_TEST_LOCK`], so the plain mutex is
+/// only ever held for a short, non-awaiting read or write.
+static INITIALIZED_URL: LazyLock<std::sync::Mutex<Option<String>>> =
+    LazyLock::new(|| std::sync::Mutex::new(None));
 
 /// Serializes tests that temporarily mutate process-wide environment
 /// variables against tests that read them. `tx_pool` holds this lock
@@ -144,13 +157,23 @@ pub async fn tx_pool_from(
     let url = resolve_url(test_url, prod_url)?;
     let lock = (*DB_TEST_LOCK).clone().lock_owned().await;
     let pool = PgPool::connect(&url).await.expect("connect");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations");
-    crate::temporal::catalog::sync_fact_catalog(&pool)
-        .await
-        .expect("fact catalog");
+    let already_initialized = INITIALIZED_URL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_deref()
+        == Some(url.as_str());
+    if !already_initialized {
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        crate::temporal::catalog::sync_fact_catalog(&pool)
+            .await
+            .expect("fact catalog");
+        *INITIALIZED_URL
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(url);
+    }
     cleanup(&pool).await;
     let pool_clone = pool.clone();
     Some((
@@ -163,6 +186,13 @@ pub async fn tx_pool_from(
 }
 
 /// Run `TRUNCATE … CASCADE` on every high-level table.
+///
+/// The tables are truncated by a single statement: on the shared test
+/// database one statement per table costs seconds because each
+/// `TRUNCATE` re-acquires `ACCESS EXCLUSIVE` locks. If the batch fails
+/// (for example, when a caller passes a schema-less scratch database),
+/// fall back to per-table statements so the individual failures are
+/// reported instead of hidden behind the first one.
 pub async fn cleanup(pool: &PgPool) {
     let mut tx = match pool.begin().await {
         Ok(t) => t,
@@ -171,12 +201,21 @@ pub async fn cleanup(pool: &PgPool) {
             return;
         }
     };
-    for table in TABLES {
-        // Safe: TABLES is a fixed internal constant, not user input
-        let q = format!("TRUNCATE TABLE {} RESTART IDENTITY CASCADE", table);
-        if let Err(e) = sqlx::query(AssertSqlSafe(q)).execute(&mut *tx).await {
-            eprintln!("db-cleanup: {}: {}", table, e);
+    let batch = format!(
+        "TRUNCATE TABLE {} RESTART IDENTITY CASCADE",
+        TABLES.join(", ")
+    );
+    if let Err(error) = sqlx::query(AssertSqlSafe(batch)).execute(&mut *tx).await {
+        eprintln!("db-cleanup: batch truncate failed: {error}");
+        let _ = tx.rollback().await;
+        for table in TABLES {
+            // Safe: TABLES is a fixed internal constant, not user input
+            let q = format!("TRUNCATE TABLE {} RESTART IDENTITY CASCADE", table);
+            if let Err(e) = sqlx::query(AssertSqlSafe(q)).execute(pool).await {
+                eprintln!("db-cleanup: {}: {}", table, e);
+            }
         }
+        return;
     }
     if let Err(e) = tx.commit().await {
         eprintln!("db-cleanup: commit: {}", e);
