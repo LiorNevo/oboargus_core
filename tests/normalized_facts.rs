@@ -6,7 +6,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use obolargus_core::common::tx_pool;
 use obolargus_core::domain::id::{AssetId, DomainId, IssuerId, PortfolioId};
 use obolargus_core::temporal::catalog::fact_catalog;
-use obolargus_core::temporal::facts::read::{fact_at, fact_coverage, fact_history, fact_series};
+use obolargus_core::temporal::facts::read::{
+    fact_as_known, fact_at, fact_coverage, fact_history, fact_point_by_id, fact_series,
+    fact_series_page, observation_series,
+};
 use obolargus_core::temporal::facts::write::write_fact;
 use obolargus_core::temporal::observations::{
     NewMarketObservation, append_observation, ensure_market_observation_partitions,
@@ -599,4 +602,521 @@ fn input_for_retraction(asset_id: AssetId, valid_at: ValidAt) -> NewMarketObserv
         adjustment: Adjustment::None,
         sequence: None,
     }
+}
+
+#[tokio::test]
+async fn fact_writes_and_retractions_reject_invalid_inputs() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    let asset = seed_asset(&pool, "Invalid Write Asset").await;
+    let issuer = seed_issuer(&pool).await;
+    let portfolio = seed_portfolio(&pool).await;
+    let day = valid("2026-01-02");
+    let moment = known("2026-01-02T12:00:00Z");
+
+    let unknown = write_fact(
+        &pool,
+        FactInput {
+            subject: asset,
+            fact_type: "does_not_exist".to_string(),
+            valid_at: day,
+            known_at: moment,
+            source: "fixture".to_string(),
+            value: FactValue::Text { value: "x".into() },
+        },
+    )
+    .await
+    .expect_err("unknown fact type");
+    assert!(matches!(unknown, TemporalError::UnknownFactType { .. }));
+
+    let empty_source = write_fact(
+        &pool,
+        FactInput {
+            subject: asset,
+            fact_type: "name".to_string(),
+            valid_at: day,
+            known_at: moment,
+            source: "   ".to_string(),
+            value: FactValue::Text { value: "x".into() },
+        },
+    )
+    .await
+    .expect_err("empty source");
+    assert!(matches!(
+        empty_source,
+        TemporalError::InvalidFactValue { .. }
+    ));
+
+    let first_belief = write_fact(
+        &pool,
+        FactInput {
+            subject: issuer,
+            fact_type: "credit_rating".to_string(),
+            valid_at: day,
+            known_at: moment,
+            source: "fixture".to_string(),
+            value: FactValue::Text { value: "AA".into() },
+        },
+    )
+    .await
+    .expect("first belief");
+    write_fact(
+        &pool,
+        FactInput {
+            subject: issuer,
+            fact_type: "credit_rating".to_string(),
+            valid_at: day,
+            known_at: moment,
+            source: "fixture".to_string(),
+            value: FactValue::Text { value: "AA".into() },
+        },
+    )
+    .await
+    .expect("idempotent re-write");
+    let conflict = write_fact(
+        &pool,
+        FactInput {
+            subject: issuer,
+            fact_type: "credit_rating".to_string(),
+            valid_at: day,
+            known_at: moment,
+            source: "fixture".to_string(),
+            value: FactValue::Text { value: "BB".into() },
+        },
+    )
+    .await
+    .expect_err("same known_at is a conflict");
+    assert!(matches!(conflict, TemporalError::ConflictingAppend { .. }));
+    assert_eq!(
+        fact_point_by_id(&pool, Uuid::new_v4())
+            .await
+            .expect("missing id"),
+        None
+    );
+
+    let unknown_retraction = retract_fact(
+        &pool,
+        RetractionInput {
+            subject: asset,
+            fact_type: "does_not_exist".to_string(),
+            valid_at: day,
+            known_at: moment,
+            source: "fixture".to_string(),
+            reason: "gone".to_string(),
+        },
+    )
+    .await
+    .expect_err("unknown fact type");
+    assert!(matches!(
+        unknown_retraction,
+        TemporalError::UnknownFactType { .. }
+    ));
+
+    let empty_reason = retract_fact(
+        &pool,
+        RetractionInput {
+            subject: asset,
+            fact_type: "name".to_string(),
+            valid_at: day,
+            known_at: moment,
+            source: "fixture".to_string(),
+            reason: "  ".to_string(),
+        },
+    )
+    .await
+    .expect_err("empty reason");
+    assert!(matches!(
+        empty_reason,
+        TemporalError::InvalidFactValue { .. }
+    ));
+
+    let missing = retract_fact(
+        &pool,
+        RetractionInput {
+            subject: portfolio,
+            fact_type: "benchmark".to_string(),
+            valid_at: day,
+            known_at: moment,
+            source: "fixture".to_string(),
+            reason: "gone".to_string(),
+        },
+    )
+    .await
+    .expect_err("no value");
+    assert!(matches!(missing, TemporalError::NoValue { .. }));
+
+    write(
+        &pool,
+        issuer,
+        "credit_rating",
+        day,
+        known("2026-01-03T12:00:00Z"),
+        FactValue::Text { value: "AA".into() },
+    )
+    .await;
+    let retraction = RetractionInput {
+        subject: issuer,
+        fact_type: "credit_rating".to_string(),
+        valid_at: day,
+        known_at: known("2026-01-04T12:00:00Z"),
+        source: "fixture".to_string(),
+        reason: "downgrade".to_string(),
+    };
+    retract_fact(&pool, retraction.clone())
+        .await
+        .expect("retract");
+    retract_fact(&pool, retraction.clone())
+        .await
+        .expect("idempotent retraction");
+    let retraction_conflict = retract_fact(
+        &pool,
+        RetractionInput {
+            reason: "different reason".to_string(),
+            known_at: known("2026-01-03T12:00:00Z"),
+            ..retraction
+        },
+    )
+    .await
+    .expect_err("older retraction conflicts");
+    assert!(matches!(
+        retraction_conflict,
+        TemporalError::ConflictingAppend { .. }
+    ));
+
+    // The earlier conflict was a read-only check: history still holds one belief
+    // plus the retraction, and the pre-retraction belief is readable as known.
+    let as_known = fact_as_known(
+        &pool,
+        issuer,
+        "credit_rating",
+        day,
+        known("2026-01-03T12:00:00Z"),
+    )
+    .await
+    .expect("as known")
+    .expect("belief");
+    assert_eq!(as_known.id, first_belief.id);
+    assert_eq!(as_known.value, Some(FactValue::Text { value: "AA".into() }));
+    assert_eq!(
+        fact_history(&pool, issuer, "credit_rating", day)
+            .await
+            .expect("history")
+            .len(),
+        2
+    );
+    assert!(
+        fact_at(&pool, issuer, "credit_rating", day)
+            .await
+            .expect("current")
+            .is_none()
+    );
+
+    guard.cleanup().await;
+}
+
+#[tokio::test]
+async fn fact_reads_cover_subjects_pagination_and_missing_payloads() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    let asset = seed_asset(&pool, "Read Paths Asset").await;
+    let issuer = seed_issuer(&pool).await;
+    let portfolio = seed_portfolio(&pool).await;
+    let window = TemporalWindow::new(valid("2026-01-01"), valid("2026-02-01")).expect("window");
+
+    // Every subject kind resolves its own table before returning empty.
+    for subject in [issuer, portfolio] {
+        assert!(
+            fact_series(&pool, subject, "name", window, None)
+                .await
+                .expect("empty series")
+                .is_empty()
+        );
+        assert!(
+            fact_coverage(&pool, subject)
+                .await
+                .expect("empty coverage")
+                .is_empty()
+        );
+    }
+    let missing_issuer = FactSubject::Issuer(IssuerId::from_uuid(Uuid::new_v4()));
+    assert!(matches!(
+        fact_at(&pool, missing_issuer, "credit_rating", valid("2026-01-02"))
+            .await
+            .expect_err("missing issuer"),
+        TemporalError::UnknownSubject { .. }
+    ));
+    let missing_portfolio = FactSubject::Portfolio(PortfolioId::from_uuid(Uuid::new_v4()));
+    assert!(matches!(
+        fact_coverage(&pool, missing_portfolio)
+            .await
+            .expect_err("missing portfolio"),
+        TemporalError::UnknownSubject { .. }
+    ));
+
+    assert!(matches!(
+        fact_at(&pool, asset, "does_not_exist", valid("2026-01-02"))
+            .await
+            .expect_err("unknown fact type"),
+        TemporalError::UnknownFactType { .. }
+    ));
+    assert!(matches!(
+        fact_as_known(
+            &pool,
+            asset,
+            "does_not_exist",
+            valid("2026-01-02"),
+            known("2026-01-02T12:00:00Z"),
+        )
+        .await
+        .expect_err("unknown fact type"),
+        TemporalError::UnknownFactType { .. }
+    ));
+    assert!(matches!(
+        fact_history(&pool, asset, "does_not_exist", valid("2026-01-02"))
+            .await
+            .expect_err("unknown fact type"),
+        TemporalError::UnknownFactType { .. }
+    ));
+    assert!(matches!(
+        fact_series_page(&pool, asset, "does_not_exist", window, None, None, 10,)
+            .await
+            .expect_err("unknown fact type"),
+        TemporalError::UnknownFactType { .. }
+    ));
+
+    // Market-price reads are asset-only, including the observation facade.
+    for subject in [issuer, portfolio] {
+        assert!(matches!(
+            fact_at(&pool, subject, "market_price", valid("2026-01-02"))
+                .await
+                .expect_err("asset-only"),
+            TemporalError::InvalidSubject { .. }
+        ));
+        assert!(matches!(
+            fact_series(&pool, subject, "market_price", window, None)
+                .await
+                .expect_err("asset-only"),
+            TemporalError::InvalidSubject { .. }
+        ));
+        assert!(matches!(
+            observation_series(&pool, subject, "fixture", window, None)
+                .await
+                .expect_err("asset-only"),
+            TemporalError::InvalidSubject { .. }
+        ));
+    }
+    assert!(
+        fact_at(&pool, asset, "market_price", valid("2026-01-02"))
+            .await
+            .expect("market price read")
+            .is_none()
+    );
+
+    // Pagination: three days, a two-row page, then the remainder.
+    let mut expected_dates = Vec::new();
+    for (index, day) in ["2026-01-02", "2026-01-03", "2026-01-04"]
+        .iter()
+        .enumerate()
+    {
+        let at = valid(day);
+        expected_dates.push(at);
+        write(
+            &pool,
+            asset,
+            "nav",
+            at,
+            known("2026-01-05T12:00:00Z"),
+            FactValue::Decimal {
+                value: Decimal::from(index + 1),
+            },
+        )
+        .await;
+    }
+    let first_page = fact_series_page(&pool, asset, "nav", window, None, None, 2)
+        .await
+        .expect("first page");
+    assert!(first_page.has_more);
+    assert_eq!(first_page.points.len(), 2);
+    let second_page = fact_series_page(
+        &pool,
+        asset,
+        "nav",
+        window,
+        None,
+        Some(first_page.points[1].valid_at),
+        2,
+    )
+    .await
+    .expect("second page");
+    assert!(!second_page.has_more);
+    assert_eq!(second_page.points.len(), 1);
+    assert_eq!(second_page.points[0].valid_at, expected_dates[2]);
+
+    let mut reference_id = None;
+    for point in &first_page.points {
+        assert_eq!(
+            fact_point_by_id(&pool, point.id)
+                .await
+                .expect("point by id")
+                .expect("present")
+                .id,
+            point.id
+        );
+        reference_id = Some(point.id);
+    }
+    assert!(reference_id.is_some());
+
+    // An envelope without its payload is an error, not a silent empty value.
+    let orphan_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO temporal_facts \
+         (id, asset_id, fact_type, valid_at, known_at, source, content_hash) \
+         VALUES ($1, $2, 'name', '2026-01-02T00:00:00Z', \
+                 '2026-01-02T12:00:00Z', 'orphan', 'hash')",
+    )
+    .bind(orphan_id)
+    .bind(asset.id())
+    .execute(&pool)
+    .await
+    .expect("insert orphan");
+    let missing = fact_point_by_id(&pool, orphan_id)
+        .await
+        .expect_err("missing payload");
+    assert!(matches!(missing, TemporalError::MissingPayload { .. }));
+
+    guard.cleanup().await;
+}
+
+#[tokio::test]
+async fn observation_edges_reject_conflicts_and_cover_lookups() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    let FactSubject::Asset(asset_id) = seed_asset(&pool, "Observation Edges").await else {
+        unreachable!()
+    };
+    let day = valid("2026-01-02");
+    let first_known = known("2026-01-02T12:00:00Z");
+    let mut input = input_for_retraction(asset_id, day);
+    input.source = "edge-source".into();
+    input.known_at = first_known;
+    input.open = Some(Decimal::ONE);
+    input.high = Some(Decimal::ONE);
+    input.low = Some(Decimal::ONE);
+    input.close = Some(Decimal::ONE);
+    input.volume = Some(Decimal::ONE);
+    input.adjustment = Adjustment::Unadjusted;
+
+    let first = observation_edges_append(&pool, &input).await;
+    let (again, inserted) =
+        obolargus_core::temporal::observations::append_observation_outcome(&pool, input.clone())
+            .await
+            .expect("idempotent append");
+    assert_eq!(again.id, first.id);
+    assert!(!inserted);
+
+    let mut conflicting = input.clone();
+    conflicting.close = Some(Decimal::from(2));
+    conflicting.high = Some(Decimal::from(2));
+    conflicting.open = Some(Decimal::from(2));
+    conflicting.low = Some(Decimal::from(2));
+    let conflict =
+        obolargus_core::temporal::observations::append_observation_outcome(&pool, conflicting)
+            .await
+            .expect_err("stale known_at conflicts");
+    assert!(matches!(conflict, TemporalError::ConflictingAppend { .. }));
+
+    let empty_reason = retract_observation(&pool, input.clone(), "  ")
+        .await
+        .expect_err("empty reason");
+    assert!(matches!(
+        empty_reason,
+        TemporalError::InvalidFactValue { .. }
+    ));
+
+    let at = obolargus_core::temporal::observations::observation_at(
+        &pool,
+        asset_id,
+        "eod",
+        0,
+        "edge-source",
+        day,
+    )
+    .await
+    .expect("at")
+    .expect("present");
+    assert_eq!(at.id, first.id);
+
+    let retraction = obolargus_core::temporal::observations::retract_observation(
+        &pool,
+        NewMarketObservation {
+            known_at: known("2026-01-03T12:00:00Z"),
+            ..input.clone()
+        },
+        "gone",
+    )
+    .await
+    .expect("retract");
+    let repeated = obolargus_core::temporal::observations::retract_observation(
+        &pool,
+        NewMarketObservation {
+            known_at: known("2026-01-03T12:00:00Z"),
+            ..input.clone()
+        },
+        "gone",
+    )
+    .await
+    .expect("idempotent retraction");
+    assert_eq!(repeated.id, retraction.id);
+
+    let retraction_conflict = obolargus_core::temporal::observations::retract_observation(
+        &pool,
+        NewMarketObservation {
+            known_at: first_known,
+            ..input.clone()
+        },
+        "different",
+    )
+    .await
+    .expect_err("older retraction conflicts");
+    assert!(matches!(
+        retraction_conflict,
+        TemporalError::ConflictingAppend { .. }
+    ));
+
+    assert!(
+        obolargus_core::temporal::observations::observation_at(
+            &pool,
+            asset_id,
+            "eod",
+            0,
+            "edge-source",
+            day,
+        )
+        .await
+        .expect("retracted at")
+        .is_none()
+    );
+    assert!(matches!(
+        ensure_market_observation_partitions(&pool, date("2026-02-01"), date("2026-01-01"))
+            .await
+            .expect_err("reversed"),
+        TemporalError::InvalidTime { .. }
+    ));
+    ensure_market_observation_partitions(&pool, date("2031-11-15"), date("2032-02-02"))
+        .await
+        .expect("multi-month partitions");
+
+    guard.cleanup().await;
+}
+
+async fn observation_edges_append(
+    pool: &PgPool,
+    input: &NewMarketObservation,
+) -> obolargus_core::temporal::observations::Observation {
+    append_observation(pool, input.clone())
+        .await
+        .expect("append observation")
 }

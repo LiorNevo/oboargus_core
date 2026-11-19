@@ -172,4 +172,43 @@ mod tests {
         assert!(built.trimmed);
         assert!(built.messages.len() >= 2);
     }
+
+    #[test]
+    fn an_empty_prompt_is_only_the_preamble() {
+        assert_eq!(system_prompt("   "), SAFETY_PREAMBLE);
+        assert_eq!(
+            ChatMessage::new("user", "hello").content,
+            "hello".to_string()
+        );
+    }
+
+    #[test]
+    fn keeps_stopped_answers_and_drops_unknown_or_empty_messages() {
+        let history = vec![
+            message("system", "complete", "ignored system"),
+            message("user", "complete", ""),
+            message("agent", "stopped", "stopped answer"),
+            message("tool", "complete", "ignored tool"),
+        ];
+        let built = build_context("Be precise.", &history, "now", 10, 10_000);
+        assert!(!built.trimmed);
+        assert_eq!(built.messages.len(), 3);
+        assert_eq!(built.messages[0].role, "system");
+        assert!(built.messages[0].content.ends_with("Be precise."));
+        assert_eq!(built.messages[1].role, "assistant");
+        assert_eq!(built.messages[1].content, "stopped answer");
+        assert_eq!(built.messages[2].content, "now");
+    }
+
+    #[test]
+    fn zero_message_budget_still_keeps_the_current_question() {
+        let history = vec![
+            message("user", "complete", "old one"),
+            message("agent", "complete", "old answer"),
+        ];
+        let built = build_context("", &history, "now", 0, 10_000);
+        assert!(built.trimmed);
+        assert_eq!(built.messages.len(), 3);
+        assert_eq!(built.messages[2].content, "now");
+    }
 }

@@ -176,4 +176,150 @@ mod tests {
         assert!(validate_observation(4000, 600, "image/jpeg", 1000, &[], &[], limits()).is_err());
         assert!(validate_observation(800, 600, "image/png", 1000, &[], &[], limits()).is_err());
     }
+
+    fn mask(x: i32, y: i32, w: i32, h: i32) -> MaskRegion {
+        MaskRegion {
+            element_ref: Some("e1".to_string()),
+            reason: "credential".to_string(),
+            x,
+            y,
+            w,
+            h,
+        }
+    }
+
+    #[test]
+    fn rejects_non_positive_dimensions_and_sizes() {
+        assert!(validate_observation(0, 600, "image/jpeg", 1000, &[], &[], limits()).is_err());
+        assert!(validate_observation(800, 0, "image/jpeg", 1000, &[], &[], limits()).is_err());
+        assert!(validate_observation(800, 600, "image/jpeg", 0, &[], &[], limits()).is_err());
+        assert!(validate_observation(800, 600, "image/jpeg", 524_289, &[], &[], limits()).is_err());
+    }
+
+    #[test]
+    fn rejects_too_many_elements_and_masks() {
+        let elements: Vec<ElementRef> = (0..201).map(|_| element("empty")).collect();
+        assert!(
+            validate_observation(800, 600, "image/jpeg", 1000, &[], &elements, limits()).is_err()
+        );
+
+        let masks: Vec<MaskRegion> = (0..201).map(|_| mask(0, 0, 1, 1)).collect();
+        assert!(validate_observation(800, 600, "image/jpeg", 1000, &masks, &[], limits()).is_err());
+    }
+
+    #[test]
+    fn rejects_masks_without_area_or_outside_the_image() {
+        assert!(
+            validate_observation(
+                800,
+                600,
+                "image/jpeg",
+                1000,
+                &[mask(0, 0, 0, 1)],
+                &[],
+                limits()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_observation(
+                800,
+                600,
+                "image/jpeg",
+                1000,
+                &[mask(0, 0, 1, 0)],
+                &[],
+                limits()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_observation(
+                800,
+                600,
+                "image/jpeg",
+                1000,
+                &[mask(-1, 0, 1, 1)],
+                &[],
+                limits()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_observation(
+                800,
+                600,
+                "image/jpeg",
+                1000,
+                &[mask(0, -1, 1, 1)],
+                &[],
+                limits()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_observation(
+                800,
+                600,
+                "image/jpeg",
+                1000,
+                &[mask(790, 0, 20, 1)],
+                &[],
+                limits()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_observation(
+                800,
+                600,
+                "image/jpeg",
+                1000,
+                &[mask(0, 590, 1, 20)],
+                &[],
+                limits()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn unmasked_states_do_not_require_a_mask() {
+        assert!(
+            validate_observation(
+                800,
+                600,
+                "image/jpeg",
+                1000,
+                &[],
+                &[element("filled"), element("empty")],
+                limits()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_mask_without_a_ref_does_not_cover_a_secret() {
+        let mask = MaskRegion {
+            element_ref: None,
+            reason: "credential".to_string(),
+            x: 0,
+            y: 0,
+            w: 100,
+            h: 20,
+        };
+        assert!(
+            validate_observation(
+                800,
+                600,
+                "image/jpeg",
+                1000,
+                &[mask],
+                &[element("masked")],
+                limits()
+            )
+            .is_err()
+        );
+    }
 }

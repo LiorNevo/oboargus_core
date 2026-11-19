@@ -3,28 +3,25 @@
 //! `tx_pool()` returns a `&PgPool` and a `PoolGuard`. The fixture
 //! runs `TRUNCATE … CASCADE` on every high-level table *before*
 //! yielding the pool, so every test starts with an empty database.
-//! The `PoolGuard::Drop` impl also runs `TRUNCATE … CASCADE` to
-//! keep the test database tidy.
+//! Call `PoolGuard::cleanup()` if a test also wants to tidy the
+//! database before dropping the guard.
 //!
-//! **Serial execution required.** These integration tests share a
-//! single PostgreSQL test database (named by `TEST_DATABASE_URL`)
-//! and truncate its tables in-place. Running them in parallel
-//! causes one test's `TRUNCATE` to wipe another test's in-flight
-//! fixture data, producing `23503` foreign-key violations. The
-//! test suite is forced to run serially via
-//! `RUST_TEST_THREADS=1` in `.cargo/config.toml` at the crate root.
-//! A follow-up refactor (T081 follow-up) could move the per-test
-//! isolation to a per-test `Transaction` (correct + parallel); the
-//! current serial approach is the smallest correct change.
+//! **The fixture serializes database tests itself.** These integration
+//! tests share a single PostgreSQL test database (named by
+//! `TEST_DATABASE_URL`) and truncate its tables in-place. The
+//! `DB_TEST_LOCK` mutex is held for the lifetime of every `PoolGuard`,
+//! so even when the Rust test harness runs tests in parallel, only one
+//! database test can own the database at a time. This avoids the
+//! `TRUNCATE`/foreign-key deadlocks that occur when two tests clean and
+//! repopulate the same tables concurrently.
 //!
 //! The same database is shared with the **other** crates'
 //! integration tests (`obolargus_server`'s `market_data_e2e.rs` and
-//! `obolargus_cli`'s `sync_db.rs`), so two crates' test suites must
-//! not run at the same time either. The root `Makefile`'s `test` and
-//! `coverage` targets run the submodules one after another, which is
-//! the supported way to run them. Running two crates' suites
-//! concurrently in separate shells causes `TRUNCATE` cross-talk and
-//! spurious foreign-key failures.
+//! `obolargus_cli`'s `sync_db.rs`). Cargo runs different crates' test
+//! binaries sequentially, which is the supported way to run them.
+//! Running two crates' suites concurrently in separate shells still
+//! requires separate test databases (the root `Makefile` uses its
+//! serial project loop for this reason).
 //!
 //! The fixture connects to the **test** database (named by
 //! `TEST_DATABASE_URL`), NEVER the production database. The
@@ -36,6 +33,27 @@
 
 use sqlx::AssertSqlSafe;
 use sqlx::PgPool;
+use std::sync::LazyLock;
+use tokio::sync::{Mutex, OwnedMutexGuard};
+
+/// Serializes database-backed tests even when the test harness runs
+/// tests in parallel. The guard is held by [`PoolGuard`].
+static DB_TEST_LOCK: LazyLock<std::sync::Arc<Mutex<()>>> =
+    LazyLock::new(|| std::sync::Arc::new(Mutex::new(())));
+
+/// Serializes tests that temporarily mutate process-wide environment
+/// variables against tests that read them. `tx_pool` holds this lock
+/// only while capturing the two URL values; the database work happens
+/// after it is released.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// All high-level tables, in dependency order.
 const TABLES: &[&str] = &[
@@ -105,11 +123,13 @@ pub fn resolve_url(test_url: Option<String>, prod_url: Option<String>) -> Option
 /// Open the migrations, truncate every high-level table, return a
 /// `&PgPool` for the test to use.
 pub async fn tx_pool() -> Option<(PgPool, PoolGuard)> {
-    tx_pool_from(
-        std::env::var("TEST_DATABASE_URL").ok(),
-        std::env::var("DATABASE_URL").ok(),
-    )
-    .await
+    #[cfg(test)]
+    let _env_guard = env_lock();
+    let test_url = std::env::var("TEST_DATABASE_URL").ok();
+    let prod_url = std::env::var("DATABASE_URL").ok();
+    #[cfg(test)]
+    drop(_env_guard);
+    tx_pool_from(test_url, prod_url).await
 }
 
 /// Parameterized variant of [`tx_pool`]. The two `Option<String>`
@@ -122,6 +142,7 @@ pub async fn tx_pool_from(
     prod_url: Option<String>,
 ) -> Option<(PgPool, PoolGuard)> {
     let url = resolve_url(test_url, prod_url)?;
+    let lock = (*DB_TEST_LOCK).clone().lock_owned().await;
     let pool = PgPool::connect(&url).await.expect("connect");
     sqlx::migrate!("./migrations")
         .run(&pool)
@@ -132,7 +153,13 @@ pub async fn tx_pool_from(
         .expect("fact catalog");
     cleanup(&pool).await;
     let pool_clone = pool.clone();
-    Some((pool, PoolGuard { pool: pool_clone }))
+    Some((
+        pool,
+        PoolGuard {
+            pool: pool_clone,
+            _lock: lock,
+        },
+    ))
 }
 
 /// Run `TRUNCATE … CASCADE` on every high-level table.
@@ -156,12 +183,13 @@ pub async fn cleanup(pool: &PgPool) {
     }
 }
 
-/// A guard that exposes `cleanup()` and also runs cleanup on `Drop`
-/// (best-effort). The pre-test truncate in `tx_pool` is the
-/// correctness guarantee; the explicit `cleanup()` and the `Drop`
-/// impl are for keeping the test database tidy between test runs.
+/// Holds the database-test mutex for the lifetime of the test and
+/// exposes an explicit `cleanup()` helper. The pre-test truncate in
+/// `tx_pool` is the correctness guarantee; callers may also run
+/// `cleanup()` before dropping the guard to keep the database tidy.
 pub struct PoolGuard {
     pool: PgPool,
+    _lock: OwnedMutexGuard<()>,
 }
 
 impl PoolGuard {
@@ -170,17 +198,6 @@ impl PoolGuard {
     /// test suite completes.
     pub async fn cleanup(&self) {
         cleanup(&self.pool).await;
-    }
-}
-
-impl Drop for PoolGuard {
-    fn drop(&mut self) {
-        let pool = self.pool.clone();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                cleanup(&pool).await;
-            });
-        }
     }
 }
 

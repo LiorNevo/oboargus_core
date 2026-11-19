@@ -720,3 +720,201 @@ pub struct LeaseRecord {
     /// Expiry instant.
     pub expires_at: DateTime<Utc>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_roles_round_trip() {
+        for role in [MessageRole::User, MessageRole::Agent] {
+            assert_eq!(MessageRole::parse(role.as_str()), Some(role));
+        }
+        assert_eq!(MessageRole::parse("system"), None);
+    }
+
+    #[test]
+    fn message_statuses_have_wire_values() {
+        let expected = [
+            (MessageStatus::Queued, "queued"),
+            (MessageStatus::Streaming, "streaming"),
+            (MessageStatus::Complete, "complete"),
+            (MessageStatus::Stopped, "stopped"),
+            (MessageStatus::Failed, "failed"),
+        ];
+        for (status, wire) in expected {
+            assert_eq!(status.as_str(), wire);
+        }
+    }
+
+    #[test]
+    fn turn_statuses_have_wire_values_and_terminality() {
+        let expected = [
+            (TurnStatus::Queued, "queued", false),
+            (TurnStatus::Running, "running", false),
+            (TurnStatus::AwaitingApproval, "awaiting_approval", false),
+            (
+                TurnStatus::AwaitingObservation,
+                "awaiting_observation",
+                false,
+            ),
+            (
+                TurnStatus::AwaitingActionResult,
+                "awaiting_action_result",
+                false,
+            ),
+            (TurnStatus::Completed, "completed", true),
+            (TurnStatus::Stopped, "stopped", true),
+            (TurnStatus::Failed, "failed", true),
+        ];
+        for (status, wire, terminal) in expected {
+            assert_eq!(status.as_str(), wire);
+            assert_eq!(status.is_terminal(), terminal);
+        }
+    }
+
+    #[test]
+    fn step_kinds_and_statuses_have_wire_values() {
+        let kinds = [
+            (StepKind::Reasoning, "reasoning"),
+            (StepKind::Tool, "tool"),
+            (StepKind::UiAction, "ui_action"),
+            (StepKind::Observation, "observation"),
+            (StepKind::Answer, "answer"),
+            (StepKind::Notice, "notice"),
+        ];
+        for (kind, wire) in kinds {
+            assert_eq!(kind.as_str(), wire);
+        }
+        let statuses = [
+            (StepStatus::Started, "started"),
+            (StepStatus::Completed, "completed"),
+            (StepStatus::Failed, "failed"),
+            (StepStatus::Skipped, "skipped"),
+        ];
+        for (status, wire) in statuses {
+            assert_eq!(status.as_str(), wire);
+        }
+    }
+
+    #[test]
+    fn tool_risk_and_call_statuses_have_wire_values() {
+        let risks = [
+            (ToolRisk::Read, "read"),
+            (ToolRisk::Write, "write"),
+            (ToolRisk::Destructive, "destructive"),
+        ];
+        for (risk, wire) in risks {
+            assert_eq!(risk.as_str(), wire);
+        }
+        let statuses = [
+            (ToolCallStatus::Proposed, "proposed"),
+            (ToolCallStatus::AwaitingApproval, "awaiting_approval"),
+            (ToolCallStatus::Approved, "approved"),
+            (ToolCallStatus::Denied, "denied"),
+            (ToolCallStatus::Running, "running"),
+            (ToolCallStatus::Succeeded, "succeeded"),
+            (ToolCallStatus::Failed, "failed"),
+            (ToolCallStatus::Cancelled, "cancelled"),
+            (ToolCallStatus::Expired, "expired"),
+        ];
+        for (status, wire) in statuses {
+            assert_eq!(status.as_str(), wire);
+        }
+    }
+
+    #[test]
+    fn ui_action_kinds_and_statuses_have_wire_values() {
+        let kinds = [
+            (UiActionKind::Navigate, "navigate"),
+            (UiActionKind::Click, "click"),
+            (UiActionKind::Type, "type"),
+            (UiActionKind::Select, "select"),
+            (UiActionKind::Press, "press"),
+            (UiActionKind::Scroll, "scroll"),
+            (UiActionKind::Submit, "submit"),
+        ];
+        for (kind, wire) in kinds {
+            assert_eq!(kind.as_str(), wire);
+        }
+        let statuses = [
+            (UiActionStatus::Proposed, "proposed"),
+            (UiActionStatus::AwaitingApproval, "awaiting_approval"),
+            (UiActionStatus::Approved, "approved"),
+            (UiActionStatus::Denied, "denied"),
+            (UiActionStatus::Running, "running"),
+            (UiActionStatus::Succeeded, "succeeded"),
+            (UiActionStatus::Failed, "failed"),
+            (UiActionStatus::Rejected, "rejected"),
+            (UiActionStatus::Cancelled, "cancelled"),
+            (UiActionStatus::Expired, "expired"),
+        ];
+        for (status, wire) in statuses {
+            assert_eq!(status.as_str(), wire);
+        }
+    }
+
+    #[test]
+    fn approval_and_observation_values_have_wire_values() {
+        let action_kinds = [
+            (ApprovalActionKind::Tool, "tool"),
+            (ApprovalActionKind::UiAction, "ui_action"),
+        ];
+        for (kind, wire) in action_kinds {
+            assert_eq!(kind.as_str(), wire);
+        }
+        let approval_statuses = [
+            (ApprovalStatus::Pending, "pending"),
+            (ApprovalStatus::Approved, "approved"),
+            (ApprovalStatus::Denied, "denied"),
+            (ApprovalStatus::Expired, "expired"),
+        ];
+        for (status, wire) in approval_statuses {
+            assert_eq!(status.as_str(), wire);
+        }
+        let modes = [
+            (DecisionMode::Individual, "individual"),
+            (DecisionMode::Turn, "turn"),
+            (DecisionMode::Standing, "standing"),
+        ];
+        for (mode, wire) in modes {
+            assert_eq!(mode.as_str(), wire);
+        }
+        let observation_statuses = [
+            (ObservationStatus::Requested, "requested"),
+            (ObservationStatus::Received, "received"),
+            (ObservationStatus::Consumed, "consumed"),
+            (ObservationStatus::Expired, "expired"),
+            (ObservationStatus::Cancelled, "cancelled"),
+        ];
+        for (status, wire) in observation_statuses {
+            assert_eq!(status.as_str(), wire);
+        }
+    }
+
+    #[test]
+    fn records_serialize_with_snake_case_fields() {
+        let conversation = ConversationRecord {
+            id: Uuid::nil(),
+            owner_id: "owner".to_string(),
+            client_conversation_id: Uuid::nil(),
+            title: "title".to_string(),
+            next_message_seq: 2,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let value = serde_json::to_value(&conversation).expect("serialize");
+        assert_eq!(value["owner_id"], "owner");
+        assert_eq!(value["next_message_seq"], 2);
+        assert!(value.get("client_conversation_id").is_some());
+
+        assert_eq!(
+            serde_json::to_value(MessageRole::Agent).expect("role"),
+            serde_json::json!("agent")
+        );
+        assert_eq!(
+            serde_json::to_value(TurnStatus::AwaitingActionResult).expect("status"),
+            serde_json::json!("awaiting_action_result")
+        );
+    }
+}

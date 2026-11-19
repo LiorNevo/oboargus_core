@@ -12,10 +12,9 @@ use crate::common::{PoolGuard, cleanup, resolve_url, tx_pool_from};
 use crate::domain::tests::fault::hard_fail_after_pool;
 use sqlx::Connection;
 use sqlx::PgPool;
-use std::time::Duration;
-use tokio::time::sleep;
 
 fn test_url() -> Option<String> {
+    let _env_guard = crate::common::env_lock();
     std::env::var("TEST_DATABASE_URL")
         .ok()
         .or_else(|| std::env::var("DATABASE_URL").ok())
@@ -110,52 +109,33 @@ async fn cleanup_continues_after_an_execute_failure_and_reports_a_commit_error()
 }
 
 #[tokio::test]
-async fn pool_guard_drop_runs_cleanup_concurrently_inside_a_runtime() {
+async fn pool_guard_cleanup_truncates_inside_a_runtime() {
     let Some(url) = test_url() else {
         return;
     };
-    // Run `tx_pool` on a runtime whose current_thread scheduler we
-    // then hand a non-tokio task to: dropping the guard inside the
-    // tokio runtime exercises the `Handle::try_current() == Ok` arm,
-    // and the spawned cleanup task must complete before we assert
-    // the table is empty.
     let Some((pool, guard)) = tx_pool_from(Some(url.clone()), None).await else {
         return;
     };
-    // Insert a row we can observe later.
     sqlx::query(
         "INSERT INTO issuers (id, name, issuer_type, legal_jurisdiction) \
-         VALUES (gen_random_uuid(), 'drop-test', 'corporation', 'US')",
+         VALUES (gen_random_uuid(), 'cleanup-test', 'corporation', 'US')",
     )
     .execute(&pool)
     .await
     .expect("insert issuer");
-    // Drop the guard — the Drop impl spawns `cleanup` onto the
-    // current tokio runtime. On a `current_thread` runtime we must
-    // yield to let the spawned task run; the sleep below provides
-    // enough wall time for the spawned cleanup to truncate and
-    // release its connection.
-    drop(guard);
-    sleep(Duration::from_millis(500)).await;
-    // The dropped guard's spawned cleanup must have truncated the
-    // table — no rows left.
+
+    guard.cleanup().await;
+
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM issuers")
         .fetch_one(&pool)
         .await
         .expect("count");
-    assert_eq!(n, 0, "Drop-spawned cleanup must have truncated the table");
-    cleanup(&pool).await;
+    assert_eq!(n, 0, "explicit cleanup must truncate the table");
+    drop(guard);
 }
 
 #[test]
-fn pool_guard_drop_outside_a_runtime_does_not_panic() {
-    // We need a runtime to construct the guard, but the drop itself
-    // must happen *after* the runtime is shut down so the
-    // `Handle::try_current()` returns `Err` and the else-arm fires.
-    //
-    // We use a plain `#[test]` (not `#[tokio::test]`) so there is no
-    // outer tokio runtime for `Handle::try_current()` to find when
-    // we drop the guard.
+fn pool_guard_can_be_dropped_outside_a_runtime() {
     let Some(url) = test_url() else {
         return;
     };
@@ -170,8 +150,6 @@ fn pool_guard_drop_outside_a_runtime_does_not_panic() {
         Some(guard)
     });
     drop(runtime);
-    // Drop the guard outside any runtime: the `Drop` impl's
-    // `try_current()` returns `Err` and the else-arm is exercised.
     drop(guard);
 }
 

@@ -545,3 +545,424 @@ fn compare_magnitude(
     let right = format!("{right_fraction:0<width$}");
     left.cmp(&right)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn errors_for(schema: &Value, instance: &Value) -> Vec<ValidationError> {
+        let root = json!({});
+        let mut errors = Vec::new();
+        validate_schema(schema, instance, "", &root, &mut errors);
+        errors
+    }
+
+    #[test]
+    fn references_resolve_or_report_unresolved() {
+        let root = json!({"$defs": {"Text": {"type": "string", "minLength": 1}}});
+        let mut errors = Vec::new();
+        validate_schema(
+            &json!({"$ref": "#/$defs/Text"}),
+            &json!("ok"),
+            "",
+            &root,
+            &mut errors,
+        );
+        assert!(errors.is_empty());
+
+        let mut errors = Vec::new();
+        validate_schema(
+            &json!({"$ref": "#/$defs/Missing"}),
+            &json!("ok"),
+            "",
+            &root,
+            &mut errors,
+        );
+        assert_eq!(errors[0].rule, "unresolved_ref");
+
+        assert!(resolve_ref(&root, "#/$defs/Text").is_some());
+        assert!(resolve_ref(&root, "Text").is_none());
+        assert!(resolve_ref(&json!({}), "#/$defs/Text").is_none());
+    }
+
+    #[test]
+    fn one_of_requires_exactly_one_match() {
+        let schema = json!({
+            "oneOf": [
+                {"type": "string"},
+                {"type": "boolean"}
+            ]
+        });
+        assert!(errors_for(&schema, &json!("x")).is_empty());
+        assert!(
+            errors_for(&schema, &json!(1))
+                .iter()
+                .any(|e| e.rule == "oneOf")
+        );
+
+        let overlapping = json!({
+            "oneOf": [
+                {"type": "string"},
+                {"minLength": 1}
+            ]
+        });
+        assert!(
+            errors_for(&overlapping, &json!("x"))
+                .iter()
+                .any(|e| e.rule == "oneOf")
+        );
+    }
+
+    #[test]
+    fn const_enum_and_type_are_checked() {
+        assert!(
+            errors_for(&json!({"const": "a"}), &json!("b"))
+                .iter()
+                .any(|e| e.rule == "const")
+        );
+        assert!(
+            errors_for(&json!({"enum": ["a", "b"]}), &json!("c"))
+                .iter()
+                .any(|e| e.rule == "enum")
+        );
+        let type_errors = errors_for(&json!({"type": "string"}), &json!(1));
+        assert_eq!(type_errors.len(), 1);
+        assert_eq!(type_errors[0].rule, "type");
+        assert!(errors_for(&json!({"type": ["string", "null"]}), &json!(null)).is_empty());
+        assert!(errors_for(&json!({"type": 7}), &json!(null)).is_empty());
+    }
+
+    #[test]
+    fn objects_report_required_and_additional_properties() {
+        let schema = json!({
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {"name": {"type": "string"}}
+        });
+        let errors = errors_for(&schema, &json!({"name": "x", "extra": 1}));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.pointer == "/extra" && e.rule == "additionalProperties")
+        );
+        let errors = errors_for(&schema, &json!({"extra": 1}));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.pointer == "/name" && e.rule == "required")
+        );
+        assert!(errors_for(&schema, &json!({"name": "x"})).is_empty());
+    }
+
+    #[test]
+    fn arrays_validate_each_item() {
+        let schema = json!({"type": "array", "items": {"type": "integer"}});
+        let errors = errors_for(&schema, &json!([1, "two"]));
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].pointer, "/1");
+        assert_eq!(errors[0].rule, "type");
+    }
+
+    #[test]
+    fn strings_check_length_format_pattern_and_decimal_bounds() {
+        assert!(
+            errors_for(&json!({"minLength": 2}), &json!("a"))
+                .iter()
+                .any(|e| e.rule == "minLength")
+        );
+        assert!(
+            errors_for(&json!({"maxLength": 2}), &json!("abc"))
+                .iter()
+                .any(|e| e.rule == "maxLength")
+        );
+        assert!(
+            errors_for(&json!({"format": "uuid"}), &json!("nope"))
+                .iter()
+                .any(|e| e.rule == "format")
+        );
+        assert!(
+            errors_for(
+                &json!({"pattern": crate::data_dictionary::types::DECIMAL_38_18_PATTERN}),
+                &json!("1.2.3")
+            )
+            .iter()
+            .any(|e| e.rule == "pattern")
+        );
+        assert!(
+            errors_for(&json!({"x-obolargus-minimum": "1"}), &json!("0.5"))
+                .iter()
+                .any(|e| e.rule == "minimum")
+        );
+        assert!(
+            errors_for(&json!({"x-obolargus-maximum": "1"}), &json!("1.5"))
+                .iter()
+                .any(|e| e.rule == "maximum")
+        );
+        assert!(
+            errors_for(
+                &json!({"x-obolargus-minimum": "1", "x-obolargus-maximum": "2"}),
+                &json!("1.5")
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn numbers_check_minimum_and_maximum() {
+        assert!(
+            errors_for(&json!({"minimum": 2}), &json!(1))
+                .iter()
+                .any(|e| e.rule == "minimum")
+        );
+        assert!(
+            errors_for(&json!({"maximum": 2}), &json!(3))
+                .iter()
+                .any(|e| e.rule == "maximum")
+        );
+        assert!(errors_for(&json!({"minimum": 1, "maximum": 3}), &json!(2)).is_empty());
+    }
+
+    #[test]
+    fn null_skips_nested_validation() {
+        let schema = json!({
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}}
+        });
+        assert!(errors_for(&schema, &Value::Null).is_empty());
+    }
+
+    #[test]
+    fn type_and_format_helpers_cover_every_name() {
+        for (name, value) in [
+            ("object", json!({})),
+            ("array", json!([])),
+            ("string", json!("x")),
+            ("integer", json!(1)),
+            ("number", json!(1.5)),
+            ("boolean", json!(true)),
+            ("null", Value::Null),
+        ] {
+            assert!(type_matches(name, &value), "{name}");
+        }
+        assert!(type_matches("unknown", &json!(1)));
+        assert!(matches_type(&json!("string"), &json!("x")));
+        assert!(matches_type(&json!(["boolean", "string"]), &json!("x")));
+        assert!(!matches_type(&json!(["boolean"]), &json!("x")));
+
+        assert!(matches_format(
+            "uuid",
+            "00000000-0000-0000-0000-000000000001"
+        ));
+        assert!(!matches_format("uuid", "nope"));
+        assert!(matches_format("date", "2026-01-02"));
+        assert!(!matches_format("date", "2026-13-02"));
+        assert!(matches_format("date-time", "2026-01-02T00:00:00Z"));
+        assert!(!matches_format("date-time", "2026-01-02"));
+        assert!(matches_format("int64", "-12"));
+        assert!(!matches_format("int64", "12.5"));
+        assert!(matches_format("other", "anything"));
+    }
+
+    #[test]
+    fn integer_and_decimal_pattern_helpers_are_strict() {
+        assert!(matches_integer("0"));
+        assert!(matches_integer("-1"));
+        assert!(!matches_integer(""));
+        assert!(!matches_integer("-"));
+        assert!(!matches_integer("01"));
+        assert!(!matches_integer("1a"));
+        assert!(!matches_integer(&"1".repeat(20)));
+        assert!(matches_integer(&"1".repeat(19)));
+
+        assert!(matches_decimal("0", 38, 0));
+        assert!(matches_decimal("123.45", 20, 18));
+        assert!(matches_decimal("-0.5", 20, 18));
+        assert!(!matches_decimal("", 20, 18));
+        assert!(!matches_decimal(".5", 20, 18));
+        assert!(!matches_decimal("1.", 20, 18));
+        assert!(!matches_decimal("01", 20, 18));
+        assert!(!matches_decimal("1.2.3", 20, 18));
+        assert!(!matches_decimal("1a", 20, 18));
+        assert!(!matches_decimal("1.2a", 20, 18));
+        assert!(!matches_decimal("1.234", 20, 2));
+        assert!(!matches_decimal(&"1".repeat(21), 20, 18));
+
+        assert!(matches_pattern(
+            crate::data_dictionary::types::INT64_PATTERN,
+            "1"
+        ));
+        assert!(matches_pattern(
+            crate::data_dictionary::types::CURRENCY_PATTERN,
+            "USD"
+        ));
+        assert!(!matches_pattern(
+            crate::data_dictionary::types::CURRENCY_PATTERN,
+            "usd"
+        ));
+        let hash = "a".repeat(64);
+        assert!(matches_pattern(
+            crate::data_dictionary::types::SHA256_PATTERN,
+            &hash
+        ));
+        assert!(!matches_pattern(
+            crate::data_dictionary::types::SHA256_PATTERN,
+            &"A".repeat(64)
+        ));
+        assert!(matches_pattern("unknown-pattern", "anything"));
+    }
+
+    #[test]
+    fn event_semantics_cover_transfers_and_zero_deltas() {
+        let mut errors = Vec::new();
+        validate_event(
+            &json!({"event_type": "transfer", "portfolio_id": "p1"}),
+            &mut errors,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "transfer_requires_destination")
+        );
+
+        let mut errors = Vec::new();
+        validate_event(
+            &json!({
+                "event_type": "transfer",
+                "portfolio_id": "p1",
+                "to_portfolio_id": "p1",
+                "quantity_delta": "0"
+            }),
+            &mut errors,
+        );
+        assert!(errors.iter().any(|e| e.rule == "transfer_not_self"));
+        assert!(errors.iter().any(|e| e.rule == "quantity_delta_non_zero"));
+
+        let mut errors = Vec::new();
+        validate_event(
+            &json!({
+                "event_type": "buy",
+                "portfolio_id": "p1",
+                "quantity_delta": "1.5"
+            }),
+            &mut errors,
+        );
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn observation_semantics_cover_bar_quote_and_bounds() {
+        let mut errors = Vec::new();
+        validate_observation(&json!({"kind": "bar"}), &mut errors);
+        assert!(
+            errors
+                .iter()
+                .filter(|e| e.rule == "market_observation_bar_shape")
+                .count()
+                == 4
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "market_observation_has_value")
+        );
+
+        let mut errors = Vec::new();
+        validate_observation(
+            &json!({
+                "kind": "bar",
+                "open": "11",
+                "high": "8",
+                "low": "9",
+                "close": "8",
+                "volume": "-1"
+            }),
+            &mut errors,
+        );
+        assert!(errors.iter().any(|e| e.pointer == "/high"));
+        assert!(errors.iter().any(|e| e.pointer == "/open"));
+        assert!(errors.iter().any(|e| e.pointer == "/close"));
+        assert!(errors.iter().any(|e| e.pointer == "/volume"));
+
+        let mut errors = Vec::new();
+        validate_observation(&json!({"kind": "quote", "price": "10"}), &mut errors);
+        assert!(errors.is_empty());
+
+        let mut errors = Vec::new();
+        validate_observation(&json!({"kind": "eod", "close": "10"}), &mut errors);
+        assert!(errors.is_empty());
+
+        let mut errors = Vec::new();
+        validate_observation(
+            &json!({"retracted": true, "retraction_reason": "restated"}),
+            &mut errors,
+        );
+        assert!(errors.is_empty());
+
+        let mut errors = Vec::new();
+        validate_observation(&json!([]), &mut errors);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn temporal_fact_semantics_check_catalog_and_subject() {
+        let mut errors = Vec::new();
+        validate_temporal_fact(
+            &json!({
+                "retracted": true,
+                "retraction_reason": "restated",
+                "fact_type": "nav",
+                "subject_kind": "issuer"
+            }),
+            &mut errors,
+        );
+        assert!(errors.iter().any(|e| e.rule == "invalid_subject"));
+
+        let mut errors = Vec::new();
+        validate_temporal_fact(
+            &json!({
+                "retracted": true,
+                "fact_type": "not_real",
+                "subject_kind": "asset"
+            }),
+            &mut errors,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "retraction_reason_iff_retracted")
+        );
+        assert!(errors.iter().any(|e| e.rule == "unknown_fact_type"));
+
+        let mut errors = Vec::new();
+        validate_temporal_fact(&json!("not an object"), &mut errors);
+        assert!(errors.is_empty());
+
+        let mut errors = Vec::new();
+        validate_catalog_reference(&json!({"fact_type": "name"}), &mut errors);
+        assert!(errors.is_empty());
+        let mut errors = Vec::new();
+        validate_catalog_reference(&json!(1), &mut errors);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn semantic_dispatch_handles_named_and_prefixed_definitions() {
+        let mut errors = Vec::new();
+        validate_semantics("FactType", &json!({"fact_type": "not_real"}), &mut errors);
+        assert_eq!(errors[0].rule, "unknown_fact_type");
+
+        let mut errors = Vec::new();
+        validate_semantics("FactType.nav", &json!({}), &mut errors);
+        assert!(errors.is_empty());
+
+        let mut errors = Vec::new();
+        validate_semantics("FactType.not_real", &json!({}), &mut errors);
+        assert_eq!(errors[0].rule, "unknown_fact_type");
+
+        let mut errors = Vec::new();
+        validate_semantics("Asset", &json!({}), &mut errors);
+        assert!(errors.is_empty());
+    }
+}

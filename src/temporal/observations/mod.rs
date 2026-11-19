@@ -606,4 +606,84 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 1, 2).expect("date");
         assert_eq!(date.year(), 2026);
     }
+
+    fn observation(adjustment: &str, retracted: bool) -> Observation {
+        let valid = ValidAt::midnight_utc(NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"));
+        let known = KnownAt::midnight_utc(NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"));
+        Observation {
+            id: Uuid::new_v4(),
+            asset_id: Uuid::new_v4(),
+            kind: "eod".into(),
+            interval_seconds: 0,
+            valid_at: valid.as_datetime(),
+            source: "test".into(),
+            known_at: known.as_datetime(),
+            content_hash: "hash".into(),
+            open: Some(Decimal::ONE),
+            high: Some(Decimal::ONE),
+            low: Some(Decimal::ONE),
+            close: Some(Decimal::ONE),
+            adjclose: None,
+            price: None,
+            volume: Some(Decimal::ONE),
+            currency: " usd ".into(),
+            adjustment: adjustment.into(),
+            sequence: None,
+            retracted,
+            retraction_reason: retracted.then(|| "gone".to_string()),
+        }
+    }
+
+    #[test]
+    fn observation_accessors_convert_successfully() {
+        let row = observation("unadjusted", false);
+        assert_eq!(row.asset_id(), AssetId::from_uuid(row.asset_id));
+        assert_eq!(row.valid_at().expect("valid").as_datetime(), row.valid_at);
+        assert_eq!(row.known_at().expect("known").as_datetime(), row.known_at);
+        let price = row.market_price().expect("price").expect("present");
+        let FactValue::MarketPrice(price) = price else {
+            panic!("expected market price");
+        };
+        assert_eq!(price.currency, "usd");
+
+        let point = row.to_fact_point().expect("point");
+        assert_eq!(point.fact_type, "market_price");
+        assert!(!point.retracted);
+        assert!(point.value.is_some());
+    }
+
+    #[test]
+    fn retracted_observations_have_no_market_price() {
+        let row = observation("none", true);
+        assert!(row.market_price().expect("price").is_none());
+        let point = row.to_fact_point().expect("point");
+        assert!(point.retracted);
+        assert!(point.value.is_none());
+        assert_eq!(point.retraction_reason.as_deref(), Some("gone"));
+    }
+
+    #[test]
+    fn unknown_adjustment_and_missing_ohlc_are_rejected() {
+        let unknown = observation("split-adjusted", false)
+            .market_price()
+            .expect_err("adjustment");
+        assert!(unknown.to_string().contains("unknown adjustment"));
+
+        let mut missing = observation("unadjusted", false);
+        missing.open = None;
+        let error = missing.market_price().expect_err("OHLC");
+        assert!(error.to_string().contains("missing OHLC"));
+    }
+
+    #[tokio::test]
+    async fn partition_helper_rejects_reversed_dates() {
+        let pool = sqlx::PgPool::connect_lazy("postgres://unused/unused").expect("lazy pool");
+        let reversed = ensure_market_observation_partitions(
+            &pool,
+            NaiveDate::from_ymd_opt(2026, 2, 1).expect("date"),
+            NaiveDate::from_ymd_opt(2026, 1, 1).expect("date"),
+        )
+        .await;
+        assert!(matches!(reversed, Err(TemporalError::InvalidTime { .. })));
+    }
 }

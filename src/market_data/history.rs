@@ -747,3 +747,249 @@ fn starting_progress(group_id: Uuid) -> RangeProgress {
         updated_at: Utc::now(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn at(day: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 1, day, 12, 0, 0)
+            .single()
+            .expect("instant")
+    }
+
+    fn history_row() -> HistoryRow {
+        HistoryRow {
+            entry_id: Uuid::from_u128(1),
+            entry_type: "load_run".to_string(),
+            started_at: at(1),
+            ended_at: Some(at(1)),
+            data_domain: Some("market_data".to_string()),
+            requested_source: Some("yahoo_finance".to_string()),
+            answering_sources: vec!["yahoo_finance".to_string()],
+            identifiers_requested_raw: 1,
+            identifiers_duplicated: 0,
+            identifiers_attempted: 1,
+            loaded: 1,
+            no_op: 0,
+            not_resolved: 0,
+            no_data_for_date: 0,
+            unsupported_scheme: 0,
+            rejected: 0,
+            source_unavailable: 0,
+            rate_limited: 0,
+            storage_failure: 0,
+            assets_created: 0,
+            assets_adopted: 0,
+            status: "complete".to_string(),
+            duration_ms: Some(10),
+            date_from: Some(NaiveDate::from_ymd_opt(2026, 1, 1).expect("date")),
+            date_to: Some(NaiveDate::from_ymd_opt(2026, 1, 1).expect("date")),
+            dates_requested: 1,
+            dates_completed: 1,
+            dates_with_loads: 1,
+            range_concurrency: None,
+            source_id: None,
+            before_enabled: None,
+            after_enabled: None,
+            actor: None,
+        }
+    }
+
+    fn load_row() -> LoadRunRow {
+        LoadRunRow {
+            id: Uuid::from_u128(2),
+            started_at: at(1),
+            ended_at: Some(at(1)),
+            trigger: "test".to_string(),
+            requested_source: None,
+            identifiers_requested_raw: 1,
+            identifiers_duplicated: 0,
+            identifiers_attempted: 1,
+            loaded: 1,
+            no_op: 0,
+            not_resolved: 0,
+            no_data_for_date: 0,
+            unsupported_scheme: 0,
+            rejected: 0,
+            source_unavailable: 0,
+            rate_limited: 0,
+            storage_failure: 0,
+            assets_created: 0,
+            assets_adopted: 0,
+            per_source_attempted: serde_json::json!({"src": 1}),
+            per_source_failed: serde_json::json!({}),
+            per_identifier: serde_json::json!([]),
+            duration_ms: Some(5),
+            data_domain: "market_data".to_string(),
+            as_of_date: Some(NaiveDate::from_ymd_opt(2026, 1, 1).expect("date")),
+            range_group_id: None,
+            range_from: None,
+            range_to: None,
+            range_concurrency: None,
+            answering_sources: vec!["src".to_string()],
+        }
+    }
+
+    #[test]
+    fn entries_mark_only_old_running_rows_as_stale() {
+        let completed = history_row().into_entry(at(10), 60);
+        assert!(!completed.stale);
+        assert_eq!(completed.entry_type, "load_run");
+
+        let mut running = history_row();
+        running.ended_at = None;
+        running.started_at = at(1);
+        assert!(running.into_entry(at(10), 60).stale);
+
+        let mut recent = history_row();
+        recent.ended_at = None;
+        recent.started_at = at(10);
+        assert!(!recent.into_entry(at(10), 60).stale);
+    }
+
+    #[test]
+    fn status_labels_map_to_run_status() {
+        assert_eq!(status_from_str("failed"), RunStatus::Failed);
+        assert_eq!(status_from_str("partial"), RunStatus::Partial);
+        assert_eq!(status_from_str("complete"), RunStatus::Complete);
+        assert_eq!(status_from_str("anything-else"), RunStatus::Complete);
+    }
+
+    #[test]
+    fn child_status_uses_failures_and_attempts() {
+        let mut row = load_row();
+        assert_eq!(child_status(&row), "complete");
+
+        row.ended_at = None;
+        assert_eq!(child_status(&row), "running");
+
+        row.ended_at = Some(at(1));
+        row.rejected = 1;
+        row.identifiers_attempted = 2;
+        assert_eq!(child_status(&row), "partial");
+
+        row.identifiers_attempted = 1;
+        assert_eq!(child_status(&row), "failed");
+    }
+
+    #[test]
+    fn range_detail_aggregates_completed_children() {
+        let mut entry = history_row().into_entry(at(10), 60);
+        entry.entry_type = "range_run".to_string();
+        entry.date_from = None;
+        entry.date_to = None;
+        entry.range_concurrency = Some(4);
+        entry.dates_requested = 3;
+        entry.dates_completed = 2;
+
+        let mut loaded = load_row();
+        loaded.as_of_date = Some(NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"));
+        let mut no_op = load_row();
+        no_op.id = Uuid::from_u128(3);
+        no_op.as_of_date = None;
+        no_op.loaded = 0;
+        no_op.no_op = 1;
+        no_op.identifiers_attempted = 1;
+        let mut nothing = load_row();
+        nothing.id = Uuid::from_u128(4);
+        nothing.loaded = 0;
+        nothing.no_op = 0;
+        nothing.no_data_for_date = 1;
+        let mut running = load_row();
+        running.id = Uuid::from_u128(5);
+        running.ended_at = None;
+
+        let detail =
+            range_from_rows(&entry, vec![no_op, nothing, loaded, running]).expect("range detail");
+        assert_eq!(
+            detail.from,
+            NaiveDate::from_ymd_opt(2026, 1, 1).expect("date")
+        );
+        assert_eq!(
+            detail.to,
+            NaiveDate::from_ymd_opt(2026, 1, 2).expect("date")
+        );
+        assert_eq!(detail.concurrency, 4);
+        assert_eq!(detail.dates.len(), 3, "running children are omitted");
+        assert_eq!(detail.dates_with_loads, 1);
+        assert_eq!(detail.dates_with_nothing_stored, 1);
+        assert_eq!(detail.totals.loaded, 1);
+        assert_eq!(detail.totals.no_op, 1);
+        assert_eq!(detail.totals.no_data_for_date, 1);
+        assert_eq!(detail.dates_requested, 3);
+        assert_eq!(detail.dates_completed, 2);
+    }
+
+    #[test]
+    fn range_detail_rejects_an_empty_group() {
+        let mut entry = history_row().into_entry(at(10), 60);
+        entry.date_from = None;
+        entry.date_to = None;
+        let error = range_from_rows(&entry, Vec::new()).expect_err("empty");
+        assert!(matches!(error, MarketDataProviderError::NotFound(_)));
+    }
+
+    #[test]
+    fn range_detail_uses_entry_bounds_and_defaults() {
+        let mut entry = history_row().into_entry(at(10), 60);
+        entry.entry_type = "range_run".to_string();
+        entry.date_from = Some(NaiveDate::from_ymd_opt(2026, 1, 1).expect("date"));
+        entry.date_to = Some(NaiveDate::from_ymd_opt(2026, 1, 3).expect("date"));
+        entry.range_concurrency = None;
+
+        let mut row = load_row();
+        row.as_of_date = None;
+        row.started_at = at(2);
+        row.ended_at = Some(at(2));
+        row.duration_ms = None;
+        row.rejected = 1;
+        row.identifiers_attempted = 1;
+        let detail = range_from_rows(&entry, vec![row]).expect("range detail");
+        assert_eq!(detail.concurrency, 1);
+        assert_eq!(
+            detail.from,
+            NaiveDate::from_ymd_opt(2026, 1, 1).expect("date")
+        );
+        assert_eq!(
+            detail.to,
+            NaiveDate::from_ymd_opt(2026, 1, 3).expect("date")
+        );
+        assert_eq!(detail.dates.len(), 1);
+        assert_eq!(
+            detail.dates[0].date,
+            NaiveDate::from_ymd_opt(2026, 1, 2).expect("date")
+        );
+    }
+
+    #[test]
+    fn report_from_row_validates_payloads() {
+        let row = load_row();
+        let report = report_from_row(&row, "partial").expect("report");
+        assert_eq!(report.status, RunStatus::Partial);
+        assert_eq!(report.run_id, Some(row.id));
+        assert_eq!(report.per_source_attempted.get("src"), Some(&1));
+
+        let mut invalid_identifier = load_row();
+        invalid_identifier.per_identifier = serde_json::json!({"not": "an array"});
+        assert!(matches!(
+            report_from_row(&invalid_identifier, "complete").expect_err("decode"),
+            MarketDataProviderError::Infrastructure(_)
+        ));
+
+        let mut invalid_domain = load_row();
+        invalid_domain.data_domain = "not-a-domain".to_string();
+        assert!(matches!(
+            report_from_row(&invalid_domain, "complete").expect_err("domain"),
+            MarketDataProviderError::Validation(_)
+        ));
+
+        let mut open = load_row();
+        open.ended_at = None;
+        open.duration_ms = None;
+        let report = report_from_row(&open, "complete").expect("open report");
+        assert_eq!(report.duration_ms, 0);
+        assert!(report.ended_at >= row.started_at);
+    }
+}

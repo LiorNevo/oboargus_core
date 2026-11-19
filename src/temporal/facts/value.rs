@@ -478,4 +478,423 @@ mod tests {
         assert_eq!(json["close"], "100");
         assert_eq!(json["currency"], "usd");
     }
+
+    #[test]
+    fn adjustment_wire_values_round_trip() {
+        for adjustment in [
+            Adjustment::Adjusted,
+            Adjustment::Unadjusted,
+            Adjustment::None,
+        ] {
+            assert_eq!(Adjustment::from_wire(adjustment.as_str()), Some(adjustment));
+            assert_eq!(adjustment.to_string(), adjustment.as_str());
+        }
+        assert_eq!(Adjustment::from_wire("split"), None);
+        assert_eq!(
+            serde_json::to_value(Adjustment::Unadjusted).expect("json"),
+            serde_json::json!("unadjusted")
+        );
+    }
+
+    #[test]
+    fn market_price_normalizes_currency_and_canonicalizes() {
+        let value = price("100");
+        let normalized = value.clone().normalize();
+        assert_eq!(normalized.currency, "USD");
+        let canonical = normalized.canonical();
+        assert!(canonical.contains("open=100"));
+        assert!(canonical.contains("adjclose="));
+        assert!(canonical.contains("volume=1"));
+        assert!(canonical.contains("currency=USD"));
+        assert!(canonical.contains("adjustment=unadjusted"));
+
+        let mut without_optionals = normalized;
+        without_optionals.adjclose = None;
+        without_optionals.volume = None;
+        let canonical = without_optionals.canonical();
+        assert!(canonical.contains("adjclose=;"));
+        assert!(canonical.contains("volume=;"));
+    }
+
+    #[test]
+    fn storage_kind_covers_every_value_variant() {
+        let values = [
+            (FactValue::Text { value: "x".into() }, StorageKind::Text),
+            (
+                FactValue::Decimal {
+                    value: Decimal::ONE,
+                },
+                StorageKind::Decimal,
+            ),
+            (FactValue::Integer { value: 1 }, StorageKind::Integer),
+            (FactValue::Boolean { value: true }, StorageKind::Boolean),
+            (
+                FactValue::Date {
+                    value: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+                },
+                StorageKind::Date,
+            ),
+            (
+                FactValue::Timestamp {
+                    value: DateTime::from_timestamp(0, 0).expect("epoch"),
+                },
+                StorageKind::Timestamp,
+            ),
+            (
+                FactValue::MarketPrice(price("1")),
+                StorageKind::MarketObservation,
+            ),
+        ];
+        for (value, kind) in values {
+            assert_eq!(value.storage_kind(), kind);
+        }
+    }
+
+    #[test]
+    fn canonical_representation_covers_every_value_variant() {
+        let text = FactValue::Text {
+            value: "abc".into(),
+        };
+        assert_eq!(text.canonical(), "text:3:abc");
+        assert_eq!(
+            FactValue::Decimal {
+                value: Decimal::from_str("1.50").expect("decimal"),
+            }
+            .canonical(),
+            "decimal:1.5"
+        );
+        assert_eq!(FactValue::Integer { value: -7 }.canonical(), "integer:-7");
+        assert_eq!(
+            FactValue::Boolean { value: false }.canonical(),
+            "boolean:false"
+        );
+        assert_eq!(
+            FactValue::Date {
+                value: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+            }
+            .canonical(),
+            "date:2026-01-02"
+        );
+        assert!(
+            FactValue::Timestamp {
+                value: DateTime::from_timestamp(0, 0).expect("epoch"),
+            }
+            .canonical()
+            .starts_with("timestamp:1970-01-01")
+        );
+        assert!(
+            FactValue::MarketPrice(price("100"))
+                .canonical()
+                .starts_with("market_price:")
+        );
+    }
+
+    #[test]
+    fn scalar_validation_accepts_matching_catalog_types() {
+        let cases = [
+            (
+                "name",
+                FactValue::Text {
+                    value: "Apple".into(),
+                },
+            ),
+            (
+                "nav",
+                FactValue::Decimal {
+                    value: Decimal::ONE,
+                },
+            ),
+            ("rank", FactValue::Integer { value: 1 }),
+            ("is_active", FactValue::Boolean { value: true }),
+            (
+                "inception_date",
+                FactValue::Date {
+                    value: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+                },
+            ),
+            (
+                "last_verified_at",
+                FactValue::Timestamp {
+                    value: DateTime::from_timestamp(0, 0).expect("epoch"),
+                },
+            ),
+            ("market_price", FactValue::MarketPrice(price("100"))),
+        ];
+        for (fact_type, value) in cases {
+            let def = crate::temporal::catalog::fact_type(fact_type).expect("catalog");
+            value.validate(def).expect("valid value");
+        }
+    }
+
+    #[test]
+    fn scalar_validation_rejects_wrong_type_and_empty_text() {
+        let def = crate::temporal::catalog::fact_type("nav").expect("catalog");
+        let mismatch = FactValue::Text {
+            value: "not a decimal".into(),
+        }
+        .validate(def)
+        .expect_err("type mismatch");
+        assert!(mismatch.to_string().contains("expected decimal"));
+
+        let def = crate::temporal::catalog::fact_type("name").expect("catalog");
+        let empty = FactValue::Text {
+            value: "   ".into(),
+        }
+        .validate(def)
+        .expect_err("empty text");
+        assert!(empty.to_string().contains("must not be empty"));
+    }
+
+    static CUSTOM_FIELDS: &[FactFieldDef] = &[FactFieldDef {
+        name: "value",
+        data_type: "decimal",
+        nullable: false,
+        unit: None,
+        precision: Some(6),
+        scale: Some(2),
+        min_value: Some("0"),
+        max_value: Some("10"),
+        allowed_values: &[],
+        aggregates: &[],
+        description: "Bounded decimal.",
+    }];
+
+    static CUSTOM_TEXT_FIELDS: &[FactFieldDef] = &[FactFieldDef {
+        name: "value",
+        data_type: "text",
+        nullable: false,
+        unit: None,
+        precision: None,
+        scale: None,
+        min_value: None,
+        max_value: None,
+        allowed_values: &["alpha", "beta"],
+        aggregates: &[],
+        description: "Closed vocabulary.",
+    }];
+
+    fn custom_def(fields: &'static [FactFieldDef], kind: StorageKind) -> FactTypeDef {
+        FactTypeDef {
+            fact_type: "custom",
+            display_name: "Custom",
+            description: "Test definition.",
+            storage_kind: kind,
+            aggregation: "last",
+            unit: None,
+            observation_kind: None,
+            interval_seconds: None,
+            schema_version: 1,
+            subjects: &[],
+            fields,
+        }
+    }
+
+    #[test]
+    fn decimal_validation_enforces_range_and_scale() {
+        let def = custom_def(CUSTOM_FIELDS, StorageKind::Decimal);
+        FactValue::Decimal {
+            value: Decimal::from_str("5").expect("decimal"),
+        }
+        .validate(&def)
+        .expect("in range");
+
+        let too_large = FactValue::Decimal {
+            value: Decimal::from_str("11").expect("decimal"),
+        }
+        .validate(&def)
+        .expect_err("maximum");
+        assert!(too_large.to_string().contains("above maximum"));
+
+        let too_small = FactValue::Decimal {
+            value: Decimal::from_str("-1").expect("decimal"),
+        }
+        .validate(&def)
+        .expect_err("minimum");
+        assert!(too_small.to_string().contains("below minimum"));
+
+        let too_precise = FactValue::Decimal {
+            value: Decimal::from_str("1.234").expect("decimal"),
+        }
+        .validate(&def)
+        .expect_err("scale");
+        assert!(too_precise.to_string().contains("scale"));
+    }
+
+    #[test]
+    fn text_validation_enforces_the_allowed_vocabulary() {
+        let def = custom_def(CUSTOM_TEXT_FIELDS, StorageKind::Text);
+        FactValue::Text {
+            value: "alpha".into(),
+        }
+        .validate(&def)
+        .expect("allowed");
+        let rejected = FactValue::Text {
+            value: "gamma".into(),
+        }
+        .validate(&def)
+        .expect_err("not allowed");
+        assert!(rejected.to_string().contains("not one of"));
+    }
+
+    #[test]
+    fn a_fact_type_without_fields_is_invalid() {
+        let def = custom_def(&[], StorageKind::Text);
+        let error = FactValue::Text { value: "x".into() }
+            .validate(&def)
+            .expect_err("no fields");
+        assert!(error.to_string().contains("no declared fields"));
+    }
+
+    #[test]
+    fn market_price_validation_rejects_each_invariant() {
+        let def = crate::temporal::catalog::fact_type("market_price").expect("catalog");
+
+        let mut negative = price("100");
+        negative.open = Decimal::NEGATIVE_ONE;
+        assert!(
+            FactValue::MarketPrice(negative)
+                .validate(def)
+                .expect_err("negative")
+                .to_string()
+                .contains("open")
+        );
+
+        let mut negative = price("100");
+        negative.high = Decimal::NEGATIVE_ONE;
+        assert!(FactValue::MarketPrice(negative).validate(def).is_err());
+
+        let mut negative = price("100");
+        negative.low = Decimal::NEGATIVE_ONE;
+        assert!(FactValue::MarketPrice(negative).validate(def).is_err());
+
+        let mut negative = price("100");
+        negative.close = Decimal::NEGATIVE_ONE;
+        assert!(FactValue::MarketPrice(negative).validate(def).is_err());
+
+        let mut open_outside = price("100");
+        open_outside.open = Decimal::from_str("101").expect("decimal");
+        assert!(
+            FactValue::MarketPrice(open_outside)
+                .validate(def)
+                .expect_err("open")
+                .to_string()
+                .contains("open must be between")
+        );
+
+        let mut close_outside = price("100");
+        close_outside.close = Decimal::from_str("99").expect("decimal");
+        assert!(
+            FactValue::MarketPrice(close_outside)
+                .validate(def)
+                .expect_err("close")
+                .to_string()
+                .contains("close must be between")
+        );
+
+        let mut negative_adjclose = price("100");
+        negative_adjclose.adjclose = Some(Decimal::NEGATIVE_ONE);
+        assert!(
+            FactValue::MarketPrice(negative_adjclose)
+                .validate(def)
+                .is_err()
+        );
+
+        let mut negative_volume = price("100");
+        negative_volume.volume = Some(Decimal::NEGATIVE_ONE);
+        assert!(
+            FactValue::MarketPrice(negative_volume)
+                .validate(def)
+                .is_err()
+        );
+
+        let mut short_currency = price("100");
+        short_currency.currency = "US".into();
+        assert!(
+            FactValue::MarketPrice(short_currency)
+                .validate(def)
+                .is_err()
+        );
+
+        let mut numeric_currency = price("100");
+        numeric_currency.currency = "U1D".into();
+        assert!(
+            FactValue::MarketPrice(numeric_currency)
+                .validate(def)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn every_value_variant_round_trips_through_json() {
+        let values = vec![
+            FactValue::Text {
+                value: "abc".into(),
+            },
+            FactValue::Decimal {
+                value: Decimal::from_str("1.50").expect("decimal"),
+            },
+            FactValue::Integer { value: -3 },
+            FactValue::Boolean { value: true },
+            FactValue::Date {
+                value: NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"),
+            },
+            FactValue::Timestamp {
+                value: DateTime::from_timestamp(0, 0).expect("epoch"),
+            },
+            FactValue::MarketPrice(price("100")),
+        ];
+        for value in values {
+            let json = serde_json::to_value(&value).expect("serialize");
+            let round_trip: FactValue = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(round_trip, value);
+        }
+    }
+
+    #[test]
+    fn malformed_number_strings_are_rejected_on_deserialize() {
+        let bad_decimal = serde_json::from_value::<FactValue>(serde_json::json!({
+            "type": "decimal",
+            "value": "not-a-number"
+        }));
+        assert!(bad_decimal.is_err());
+
+        let bad_integer = serde_json::from_value::<FactValue>(serde_json::json!({
+            "type": "integer",
+            "value": "not-a-number"
+        }));
+        assert!(bad_integer.is_err());
+
+        let bad_optional = serde_json::from_value::<FactValue>(serde_json::json!({
+            "type": "market_price",
+            "open": "1",
+            "high": "1",
+            "low": "1",
+            "close": "1",
+            "adjclose": "nope",
+            "currency": "USD",
+            "adjustment": "unadjusted"
+        }));
+        assert!(bad_optional.is_err());
+    }
+
+    #[test]
+    fn content_and_retraction_hashes_are_distinct_and_stable() {
+        let subject =
+            FactSubject::Asset(crate::domain::id::AssetId::from_uuid(uuid::Uuid::new_v4()));
+        let valid_at = ValidAt::midnight_utc(NaiveDate::from_ymd_opt(2026, 1, 2).expect("date"));
+        let value = FactValue::Text {
+            value: "abc".into(),
+        };
+        let content = content_hash(subject, "name", valid_at, "src", &value);
+        assert_eq!(
+            content,
+            content_hash(subject, "name", valid_at, "src", &value)
+        );
+        let retraction = retraction_hash(subject, "name", valid_at, "src", "gone");
+        assert_ne!(content, retraction);
+        assert_eq!(
+            retraction,
+            retraction_hash(subject, "name", valid_at, "src", "gone")
+        );
+    }
 }

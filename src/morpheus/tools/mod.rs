@@ -321,4 +321,113 @@ mod tests {
         assert!(all.fingerprint().starts_with("sha256:"));
         assert_ne!(all.fingerprint(), filtered.fingerprint());
     }
+
+    #[test]
+    fn unknown_filtered_ids_are_rejected() {
+        let error = ToolCatalog::new(&["assets.search".to_string(), "nope".to_string()])
+            .expect_err("unknown id");
+        assert!(error.to_string().contains("nope"));
+    }
+
+    #[test]
+    fn lookup_and_spec_hashes_are_stable() {
+        let catalog = ToolCatalog::new(&[]).expect("catalog");
+        let spec = catalog.get("assets.search").expect("tool");
+        assert_eq!(spec.spec_hash(), spec.spec_hash());
+        assert!(catalog.get("nope").is_none());
+        assert_eq!(catalog.specs().len(), 6);
+    }
+
+    #[test]
+    fn summaries_redact_by_tool_shape() {
+        let catalog = ToolCatalog::new(&[]).expect("catalog");
+        let search = catalog.get("assets.search").expect("search");
+        assert_eq!(search.summarize(&json!({"query": "AAPL"})), "query: AAPL");
+        assert_eq!(search.summarize(&json!({})), "query: ");
+
+        let lookup = catalog.get("market_data.lookup").expect("lookup");
+        assert_eq!(
+            lookup.summarize(&json!({"identifier": "TICKER:AAPL", "range": "5d"})),
+            "identifier: TICKER:AAPL, range: 5d"
+        );
+
+        let series = catalog.get("market_data.series").expect("series");
+        assert!(
+            series
+                .summarize(&json!({"identifier": "AAPL"}))
+                .starts_with("identifier: AAPL, range: ")
+        );
+
+        let history = catalog.get("data_load.history").expect("history");
+        assert_eq!(
+            history.summarize(&json!({
+                "limit": 10,
+                "domain": "market_data",
+                "source": "yahoo",
+                "status": "complete",
+                "entry_type": "load_run",
+                "from": "2026-01-01",
+                "to": "2026-01-02"
+            })),
+            "limit: 10, domain: market_data, source: yahoo, status: complete, \
+             entry_type: load_run, from: 2026-01-01, to: 2026-01-02"
+        );
+        assert_eq!(history.summarize(&json!({})), "limit: ");
+
+        let load = catalog.get("market_data.load").expect("load");
+        assert_eq!(
+            load.summarize(&json!({"identifier": "AAPL", "date": "2026-01-02"})),
+            "identifier: AAPL, date: 2026-01-02"
+        );
+
+        let append = catalog.get("temporal.fact.append").expect("append");
+        assert_eq!(
+            append.summarize(&json!({"fact_id": "nav", "valid_time": "2026-01-02T00:00:00Z"})),
+            "fact: nav, valid time: 2026-01-02T00:00:00Z"
+        );
+
+        let custom = ToolSpec {
+            id: "custom.tool",
+            version: 1,
+            display_name: "Custom",
+            description: "Custom tool.",
+            risk: ToolRisk::Read,
+            parameters: json!({}),
+        };
+        assert_eq!(custom.summarize(&json!({})), "action requested");
+    }
+
+    #[test]
+    fn descriptors_expose_wire_risk_names() {
+        let catalog = ToolCatalog::new(&[]).expect("catalog");
+        let descriptor = ToolDescriptor::from(catalog.get("market_data.load").expect("tool"));
+        assert_eq!(descriptor.id, "market_data.load");
+        assert_eq!(descriptor.risk, "write");
+        assert_eq!(descriptor.version, 1);
+        assert!(json!(descriptor).get("display_name").is_some());
+    }
+
+    #[test]
+    fn required_and_range_constraints_are_enforced() {
+        let catalog = ToolCatalog::new(&[]).expect("catalog");
+        assert!(catalog.validate("assets.search", &json!({})).is_err());
+        assert!(
+            catalog
+                .validate("assets.search", &json!({"query": "x", "limit": 0}))
+                .is_err()
+        );
+        assert!(
+            catalog
+                .validate(
+                    "market_data.lookup",
+                    &json!({"identifier": "AAPL", "range": "2d"})
+                )
+                .is_err()
+        );
+        assert!(
+            catalog
+                .validate("temporal.fact.append", &json!({"fact_id": "nav"}))
+                .is_err()
+        );
+    }
 }

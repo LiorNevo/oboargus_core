@@ -17,6 +17,13 @@ Operational rules for contributors and AI agents working in this crate.
 - Coverage: `cargo llvm-cov --all-targets --no-fail-fast`
 - Format check: `cargo fmt -- --check`
 
+## Database tests
+
+- `tx_pool()` holds a process-wide async mutex for the lifetime of each
+  `PoolGuard`, so database tests are safe even when the test harness runs
+  in parallel. The fixture also uses a PostgreSQL advisory lock around
+  migrations and fact-catalog synchronization for cross-process safety.
+
 ## Notes
 
 - Keep this crate dependency-light: it is depended on by server and cli.

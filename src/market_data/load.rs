@@ -2543,6 +2543,85 @@ mod tests {
         );
     }
 
+    #[test]
+    fn total_requested_adds_not_resolved() {
+        let counters = DataSourceLoadCounters {
+            loaded: 2,
+            no_op: 1,
+            not_resolved: 4,
+            ..Default::default()
+        };
+        assert_eq!(counters.total_attempted(), 3);
+        assert_eq!(counters.total_requested(), 7);
+        assert_eq!(counters.total_failed(), 0);
+    }
+
+    #[test]
+    fn only_the_identifier_uniqueness_invariant_is_special() {
+        let uniqueness = DomainError::InvariantViolation {
+            invariant: "identifier_uniqueness",
+            detail: "collision".to_string(),
+        };
+        assert!(is_identifier_uniqueness_violation(&uniqueness));
+        let other = DomainError::InvariantViolation {
+            invariant: "portfolio_dag_acyclicity",
+            detail: "cycle".to_string(),
+        };
+        assert!(!is_identifier_uniqueness_violation(&other));
+        assert!(!is_identifier_uniqueness_violation(
+            &DomainError::Validation("bad".to_string())
+        ));
+    }
+
+    #[test]
+    fn two_venue_matches_are_ambiguous() {
+        let matches = vec![
+            TickerLookupMatch {
+                source_id: "a".into(),
+                hit: lookup_hit("ABC", "NYQ"),
+            },
+            TickerLookupMatch {
+                source_id: "b".into(),
+                hit: lookup_hit("ABC", "NYS"),
+            },
+        ];
+        assert_eq!(
+            choose_lookup_match(&matches, Some("XNYS")).expect_err("ambiguous"),
+            CreationDecline::AmbiguousMatch
+        );
+        assert_eq!(
+            choose_lookup_match(&matches, None).expect_err("ambiguous"),
+            CreationDecline::AmbiguousMatch
+        );
+    }
+
+    #[test]
+    fn lookup_manifest_records_each_failure() {
+        let walk = TickerLookupWalk {
+            matches: Vec::new(),
+            error: Some(MarketDataProviderError::Transient("down".into())),
+            failures: vec![
+                crate::market_data::registry::SourceFailure {
+                    source_id: "a".into(),
+                    error: MarketDataProviderError::Transient("down".into()),
+                },
+                crate::market_data::registry::SourceFailure {
+                    source_id: "b".into(),
+                    error: MarketDataProviderError::RateLimited {
+                        msg: "slow".into(),
+                        retry_after: None,
+                    },
+                },
+            ],
+        };
+        let manifest = lookup_manifest(&walk);
+        assert_eq!(manifest.len(), 2);
+        assert_eq!(manifest[0].source_id, "a");
+        assert!(!manifest[0].ok);
+        assert!(manifest[0].error.is_some());
+        assert_eq!(manifest[1].source_id, "b");
+    }
+
     /// The creation record serializes to the contract names.
     #[test]
     fn asset_creation_serializes_to_contract_names() {

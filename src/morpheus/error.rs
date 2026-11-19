@@ -241,3 +241,147 @@ impl From<serde_json::Error> for MorpheusError {
         Self::Infrastructure(format!("json: {error}"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_code_has_a_stable_wire_value_and_message() {
+        let codes = [
+            (ErrorCode::Validation, "validation_error"),
+            (ErrorCode::NotFound, "not_found"),
+            (ErrorCode::Conflict, "generation_in_progress"),
+            (ErrorCode::Limit, "limit_exceeded"),
+            (ErrorCode::ProviderAuth, "provider_auth"),
+            (ErrorCode::ProviderRateLimited, "provider_rate_limited"),
+            (ErrorCode::ProviderUnavailable, "provider_unavailable"),
+            (ErrorCode::ProviderTimeout, "provider_timeout"),
+            (ErrorCode::ProviderBadResponse, "provider_bad_response"),
+            (ErrorCode::ProviderCapability, "provider_capability"),
+            (ErrorCode::ToolInvalidArguments, "tool_invalid_arguments"),
+            (ErrorCode::ToolFailed, "tool_failed"),
+            (ErrorCode::ToolTimeout, "tool_timeout"),
+            (ErrorCode::ActionRejected, "action_rejected"),
+            (ErrorCode::ApprovalExpired, "approval_expired"),
+            (ErrorCode::ApprovalDenied, "approval_denied"),
+            (ErrorCode::CaptureDenied, "capture_denied"),
+            (ErrorCode::CaptureWrongSurface, "capture_wrong_surface"),
+            (ErrorCode::ObservationRejected, "observation_rejected"),
+            (ErrorCode::Interrupted, "interrupted"),
+            (ErrorCode::TurnLimit, "turn_limit"),
+            (ErrorCode::AnswerTruncated, "answer_truncated"),
+            (ErrorCode::QueueFull, "queue_full"),
+            (ErrorCode::Infrastructure, "internal_error"),
+        ];
+        for (code, wire) in codes {
+            assert_eq!(code.as_str(), wire);
+            assert!(!code.message().is_empty(), "{wire} needs a message");
+        }
+    }
+
+    #[test]
+    fn validation_errors_keep_their_message() {
+        let error = MorpheusError::validation("Name is required.");
+        assert_eq!(error.code(), ErrorCode::Validation);
+        assert_eq!(error.user_message(), "Name is required.");
+        assert_eq!(error.to_string(), "Name is required.");
+    }
+
+    #[test]
+    fn missing_rows_are_not_found_with_a_generic_user_message() {
+        let error = MorpheusError::NotFound("conversation".to_string());
+        assert_eq!(error.code(), ErrorCode::NotFound);
+        assert_eq!(error.user_message(), ErrorCode::NotFound.message());
+        assert_eq!(error.to_string(), "not found: conversation");
+    }
+
+    #[test]
+    fn conflicts_and_forbidden_states_expose_their_sentence() {
+        let conflict = MorpheusError::Conflict("Only a failed turn can be retried.".to_string());
+        assert_eq!(conflict.code(), ErrorCode::Conflict);
+        assert_eq!(
+            conflict.user_message(),
+            "Only a failed turn can be retried."
+        );
+
+        let forbidden = MorpheusError::Forbidden("This action is not allowed.".to_string());
+        assert_eq!(forbidden.code(), ErrorCode::Validation);
+        assert_eq!(forbidden.user_message(), "This action is not allowed.");
+        assert_eq!(forbidden.to_string(), "This action is not allowed.");
+    }
+
+    #[test]
+    fn provider_and_tool_errors_keep_their_classification() {
+        let provider = MorpheusError::provider(ErrorCode::ProviderTimeout, "slow upstream");
+        assert_eq!(provider.code(), ErrorCode::ProviderTimeout);
+        assert_eq!(
+            provider.user_message(),
+            ErrorCode::ProviderTimeout.message()
+        );
+        assert!(provider.to_string().contains("slow upstream"));
+        assert!(!provider.user_message().contains("slow upstream"));
+
+        let tool = MorpheusError::tool(ErrorCode::ToolInvalidArguments, "bad json");
+        assert_eq!(tool.code(), ErrorCode::ToolInvalidArguments);
+        assert_eq!(
+            tool.user_message(),
+            ErrorCode::ToolInvalidArguments.message()
+        );
+        assert!(tool.to_string().contains("bad json"));
+    }
+
+    #[test]
+    fn approval_and_infrastructure_errors_are_classified() {
+        let approval = MorpheusError::Approval("expired".to_string());
+        assert_eq!(approval.code(), ErrorCode::ApprovalExpired);
+        assert_eq!(
+            approval.user_message(),
+            ErrorCode::ApprovalExpired.message()
+        );
+        assert_eq!(approval.to_string(), "approval error: expired");
+
+        let infrastructure = MorpheusError::Infrastructure("disk".to_string());
+        assert_eq!(infrastructure.code(), ErrorCode::Infrastructure);
+        assert_eq!(
+            infrastructure.user_message(),
+            ErrorCode::Infrastructure.message()
+        );
+        assert_eq!(infrastructure.to_string(), "infrastructure error: disk");
+    }
+
+    #[test]
+    fn approval_status_maps_denied_and_expired() {
+        assert_eq!(
+            MorpheusError::tool(ErrorCode::ApprovalDenied, "no").approval_status(),
+            ApprovalStatus::Denied
+        );
+        assert_eq!(
+            MorpheusError::Approval("gone".to_string()).approval_status(),
+            ApprovalStatus::Expired
+        );
+        assert_eq!(
+            MorpheusError::validation("bad").approval_status(),
+            ApprovalStatus::Expired
+        );
+    }
+
+    #[test]
+    fn sql_and_json_errors_become_infrastructure_failures() {
+        let from_sql = MorpheusError::db(sqlx::Error::RowNotFound);
+        assert_eq!(from_sql.code(), ErrorCode::Infrastructure);
+        assert!(from_sql.to_string().contains("infrastructure error"));
+
+        let via_from: MorpheusError = sqlx::Error::PoolClosed.into();
+        assert_eq!(via_from.code(), ErrorCode::Infrastructure);
+
+        let json_error = serde_json::from_str::<serde_json::Value>("{").expect_err("invalid");
+        let via_json: MorpheusError = json_error.into();
+        assert_eq!(via_json.code(), ErrorCode::Infrastructure);
+        assert!(
+            via_json
+                .to_string()
+                .starts_with("infrastructure error: json:")
+        );
+    }
+}

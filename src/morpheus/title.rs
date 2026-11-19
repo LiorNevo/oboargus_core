@@ -60,4 +60,34 @@ mod tests {
     fn handles_empty() {
         assert_eq!(derive_title("   "), "");
     }
+
+    #[test]
+    fn keeps_a_title_at_the_limit() {
+        let title = "a".repeat(DERIVED_TITLE_CHARS);
+        assert_eq!(derive_title(&title), title);
+    }
+
+    #[test]
+    fn truncates_a_single_long_word_at_the_limit() {
+        let title = derive_title(&"a".repeat(DERIVED_TITLE_CHARS + 10));
+        assert_eq!(title.chars().count(), DERIVED_TITLE_CHARS + 1);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn truncates_at_a_space_before_the_limit() {
+        let mut content = "a".repeat(DERIVED_TITLE_CHARS - 5);
+        content.push(' ');
+        content.push_str("tail words that are removed");
+        let title = derive_title(&content);
+        assert!(title.ends_with('…'));
+        assert_eq!(title.chars().count(), DERIVED_TITLE_CHARS - 5 + 1);
+    }
+
+    #[test]
+    fn counts_unicode_characters_not_bytes() {
+        let content = "é ".repeat(60);
+        let title = derive_title(&content);
+        assert!(title.chars().count() <= DERIVED_TITLE_CHARS + 1);
+    }
 }

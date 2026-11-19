@@ -74,16 +74,20 @@ async fn check_empty_binary_succeeds_on_an_empty_database() {
     guard.cleanup().await;
 }
 
-#[test]
-fn db_cleanup_binary_truncates_high_level_tables() {
+#[tokio::test]
+async fn db_cleanup_binary_truncates_high_level_tables() {
     if !db_env_present() {
         return;
     }
+    let Some((_pool, guard)) = obolargus_core::common::tx_pool().await else {
+        return;
+    };
     let status = run_binary("db_cleanup", &[]).expect("spawn db_cleanup");
     assert!(
         status.success(),
         "db_cleanup should exit 0 on success (got {status:?})"
     );
+    guard.cleanup().await;
 }
 
 #[test]

@@ -428,5 +428,22 @@ mod tests {
             &mut counters
         ));
         assert_eq!(counters.source_unavailable, 1);
+        assert!(!classify_walk_failure(
+            &MarketDataProviderError::Infrastructure("db".into()),
+            &mut counters
+        ));
+        assert_eq!(counters.source_unavailable, 2);
+        assert!(!classify_walk_failure(
+            &MarketDataProviderError::Validation("bad".into()),
+            &mut counters
+        ));
+        assert_eq!(counters.rejected, 1);
+    }
+
+    #[test]
+    fn falls_back_to_the_first_identifier() {
+        let chosen = preferred_identifier(&[identifier("ISIN", "US0378331005")]).expect("fallback");
+        assert_eq!(chosen.scheme, "ISIN");
+        assert_eq!(chosen.value, "US0378331005");
     }
 }

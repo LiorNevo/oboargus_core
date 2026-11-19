@@ -169,3 +169,144 @@ fn baseline_document_parses() {
             .expect("parse");
     assert!(document.get("$defs").is_some());
 }
+
+#[test]
+fn bound_changes_are_classified_by_tightening() {
+    let before = json!({
+        "$defs": {
+            "Thing": {
+                "type": "string",
+                "format": "date",
+                "pattern": "^a$",
+                "minLength": 2,
+                "maxLength": 5,
+                "minimum": 1,
+                "maximum": 5
+            }
+        }
+    });
+    let mut after = before.clone();
+    let thing = definition_mut(&mut after, "Thing");
+    thing["format"] = json!("date-time");
+    thing["pattern"] = json!("^b$");
+    thing["minLength"] = json!(3);
+    thing["maxLength"] = json!(6);
+    thing["minimum"] = json!(0);
+    thing["maximum"] = json!(4);
+    let changes = classify_changes(&before, &after);
+    let find = |suffix: &str| {
+        changes
+            .iter()
+            .find(|change| change.path.ends_with(suffix))
+            .unwrap_or_else(|| panic!("missing {suffix} in {changes:?}"))
+    };
+    assert_eq!(find("/format").kind, ChangeKind::Breaking);
+    assert_eq!(find("/pattern").kind, ChangeKind::Breaking);
+    assert_eq!(find("/minLength").kind, ChangeKind::Breaking);
+    assert_eq!(find("/maxLength").kind, ChangeKind::NonBreaking);
+    assert_eq!(find("/minimum").kind, ChangeKind::NonBreaking);
+    assert_eq!(find("/maximum").kind, ChangeKind::Breaking);
+
+    let mut added = before.clone();
+    definition_mut(&mut added, "Thing")["minimum"] = json!(0);
+    let changes = classify_changes(&before, &added);
+    assert!(
+        changes
+            .iter()
+            .any(|change| change.path.ends_with("/minimum")
+                && change.kind == ChangeKind::NonBreaking)
+    );
+
+    let mut removed = before.clone();
+    removed["$defs"]["Thing"]
+        .as_object_mut()
+        .expect("thing")
+        .remove("maximum");
+    let changes = classify_changes(&before, &removed);
+    assert!(changes.iter().any(|change| {
+        change.path.ends_with("/maximum")
+            && change.kind == ChangeKind::Breaking
+            && change.description.contains("added or removed")
+    }));
+}
+
+#[test]
+fn required_properties_and_removals_are_classified() {
+    let before = json!({
+        "$defs": {
+            "Thing": {
+                "required": ["a", "b"],
+                "properties": {
+                    "a": {"type": "string"},
+                    "b": {"type": "string"}
+                }
+            }
+        }
+    });
+    let mut after = before.clone();
+    let thing = definition_mut(&mut after, "Thing");
+    thing["required"] = json!(["a"]);
+    thing["properties"]
+        .as_object_mut()
+        .expect("properties")
+        .remove("b");
+    let changes = classify_changes(&before, &after);
+    assert!(changes.iter().any(|change| {
+        change.path.ends_with("/required")
+            && change.kind == ChangeKind::NonBreaking
+            && change.description.contains('b')
+    }));
+    assert!(changes.iter().any(|change| {
+        change.path.ends_with("/properties/b")
+            && change.kind == ChangeKind::Breaking
+            && change.description == "property removed"
+    }));
+}
+
+#[test]
+fn top_level_array_members_are_classified() {
+    let before = json!({
+        "x-obolargus-relationships": [
+            {"from": "Asset", "to": "Portfolio"},
+            {"from": "Portfolio", "to": "Asset"}
+        ],
+        "x-obolargus-invariants": ["first", "second"]
+    });
+    let after = json!({
+        "x-obolargus-relationships": [{"from": "Asset", "to": "Portfolio"}],
+        "x-obolargus-invariants": ["first", "third"]
+    });
+    let changes = classify_changes(&before, &after);
+    assert!(changes.iter().any(|change| {
+        change.path == "/x-obolargus-relationships"
+            && change.kind == ChangeKind::Breaking
+            && change.description.contains("Portfolio")
+    }));
+    assert!(changes.iter().any(|change| {
+        change.path == "/x-obolargus-invariants"
+            && change.kind == ChangeKind::Breaking
+            && change.description.contains("second")
+    }));
+    assert!(changes.iter().any(|change| {
+        change.path == "/x-obolargus-invariants"
+            && change.kind == ChangeKind::NonBreaking
+            && change.description.contains("third")
+    }));
+
+    // Missing or malformed members are ignored rather than treated as changes.
+    let changes = classify_changes(&json!({}), &json!({}));
+    assert!(changes.is_empty());
+    let changes = classify_changes(
+        &json!({"x-obolargus-relationships": "not an array"}),
+        &json!({"x-obolargus-relationships": []}),
+    );
+    assert!(changes.is_empty());
+}
+
+#[test]
+fn definitions_accessor_and_parse_errors() {
+    let document = json!({"$defs": {"A": {"type": "string"}}});
+    assert!(crate::data_dictionary::compat::definitions(&document).is_some());
+    assert!(crate::data_dictionary::compat::definitions(&json!({})).is_none());
+    assert!(parse_document("{").is_err());
+}

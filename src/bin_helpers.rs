@@ -19,7 +19,6 @@ use crate::domain::DomainError;
 use sqlx::AssertSqlSafe;
 use sqlx::Connection;
 use sqlx::PgPool;
-use sqlx::migrate::MigrateError;
 
 /// All high-level tables, in dependency order. Used by
 /// [`truncate_test_tables`] to wipe the test schema without
@@ -155,20 +154,44 @@ pub async fn truncate_test_tables(pool: &PgPool) -> Result<(), DomainError> {
 /// `MigrateError` into the crate's `DomainError::Infrastructure`
 /// variant so the binary's `?` can propagate it cleanly.
 pub async fn run_migrations(pool: &PgPool) -> Result<(), DomainError> {
-    sqlx::migrate!("./migrations")
-        .run(pool)
+    // SQLx serializes the migration files themselves, but
+    // `sync_fact_catalog` runs after the migrator releases its lock and
+    // owns writes to `fact_types`/`fact_type_fields`. Hold an
+    // application-level PostgreSQL advisory lock across both steps so
+    // concurrent processes (server startup, CLI, parallel tests) cannot
+    // race the catalog inserts. The lock connection is opened directly
+    // from the pool options, so it does not consume a pool slot even
+    // when callers configure `max_connections(1)`.
+    const MIGRATION_LOCK_KEY: i64 = 0x4f42_4f4c_4152_4755;
+    let options = (*pool.connect_options()).clone();
+    let mut lock_conn = sqlx::PgConnection::connect_with(&options)
         .await
-        .map_err(|e: MigrateError| {
-            DomainError::Infrastructure(sqlx::Error::Migrate(Box::new(e)))
-        })?;
-    crate::temporal::catalog::sync_fact_catalog(pool)
+        .map_err(DomainError::Infrastructure)?;
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(MIGRATION_LOCK_KEY)
+        .execute(&mut lock_conn)
         .await
-        .map_err(|error| match error {
-            crate::temporal::TemporalError::Infrastructure(inner) => {
-                DomainError::Infrastructure(inner)
-            }
-            other => DomainError::Validation(other.to_string()),
-        })
+        .map_err(DomainError::Infrastructure)?;
+
+    let migration = sqlx::migrate!("./migrations").run(pool).await;
+    if let Err(error) = migration {
+        let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
+            .bind(MIGRATION_LOCK_KEY)
+            .execute(&mut lock_conn)
+            .await;
+        return Err(DomainError::Infrastructure(sqlx::Error::Migrate(Box::new(
+            error,
+        ))));
+    }
+    let catalog = crate::temporal::catalog::sync_fact_catalog(pool).await;
+    let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
+        .bind(MIGRATION_LOCK_KEY)
+        .execute(&mut lock_conn)
+        .await;
+    catalog.map_err(|error| match error {
+        crate::temporal::TemporalError::Infrastructure(inner) => DomainError::Infrastructure(inner),
+        other => DomainError::Validation(other.to_string()),
+    })
 }
 
 /// Return the total row count across every high-level table
@@ -321,6 +344,7 @@ mod tests {
     /// reporting their body lines as uncovered depending on the
     /// alphabetical test order.
     fn with_env<F: FnOnce() -> R, R>(test: Option<&str>, prod: Option<&str>, f: F) -> R {
+        let _env_guard = crate::common::env_lock();
         // Capture the original values so we can restore them on the
         // way out, regardless of whether the closure returns
         // normally or panics.
@@ -328,10 +352,9 @@ mod tests {
         let original_prod = std::env::var("DATABASE_URL").ok();
         // `set_var` / `remove_var` are unsafe on edition 2024
         // because they race with concurrent readers of the process
-        // environment. The `cargo-llvm-cov` test runner executes
-        // tests serially (`RUST_TEST_THREADS=1` in
-        // `.cargo/config.toml`), so the unsafe is sound here — no
-        // other thread can observe an inconsistent state.
+        // environment. `env_lock` serializes this mutation with every
+        // `tx_pool` reader, so no other thread can observe the
+        // temporary values.
         unsafe {
             match test {
                 Some(t) => std::env::set_var("TEST_DATABASE_URL", t),

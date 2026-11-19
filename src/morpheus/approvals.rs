@@ -127,5 +127,62 @@ mod tests {
         assert!(ApprovalDecision::parse("approve").is_some_and(ApprovalDecision::approves));
         assert!(!ApprovalDecision::parse("deny").is_some_and(ApprovalDecision::approves));
         assert_eq!(ApprovalDecision::parse("nope"), None);
+        assert!(
+            ApprovalDecision::parse("approve_all_turn").is_some_and(ApprovalDecision::approves)
+        );
+        assert!(
+            ApprovalDecision::parse("approve_all_remember").is_some_and(ApprovalDecision::approves)
+        );
+    }
+
+    #[test]
+    fn hashes_are_stable_and_context_bound() {
+        assert_eq!(hash_text("abc"), hash_text("abc"));
+        assert_ne!(hash_text("abc"), hash_text("abd"));
+        assert_eq!(
+            hash_json(&serde_json::json!({"a": 1})),
+            hash_json(&serde_json::json!({"a": 1}))
+        );
+        assert_ne!(
+            hash_json(&serde_json::json!({"a": 1})),
+            hash_json(&serde_json::json!({"a": 2}))
+        );
+        assert_eq!(
+            approval_context_hash("assets.search", "abc"),
+            approval_context_hash("assets.search", "abc")
+        );
+        assert_ne!(
+            approval_context_hash("assets.search", "abc"),
+            approval_context_hash("market_data.lookup", "abc")
+        );
+    }
+
+    #[test]
+    fn expiry_is_inclusive_at_the_boundary() {
+        let now = Utc::now();
+        assert!(is_expired(now, now));
+        assert!(is_expired(now - chrono::Duration::seconds(1), now));
+        assert!(!is_expired(now + chrono::Duration::seconds(1), now));
+    }
+
+    #[test]
+    fn standing_checks_non_string_grants_and_revocation() {
+        let approval = standing(serde_json::json!({ "assets.search": 1 }), vec![]);
+        assert!(!standing_covers_tool(&approval, "assets.search", "1"));
+        assert!(standing_is_active(&approval));
+
+        let mut revoked = approval;
+        revoked.revoked_at = Some(Utc::now());
+        assert!(!standing_is_active(&revoked));
+    }
+
+    #[test]
+    fn tool_grants_builds_the_grant_map() {
+        let grants = tool_grants(vec![
+            ("assets.search".to_string(), "a".to_string()),
+            ("market_data.lookup".to_string(), "b".to_string()),
+        ]);
+        assert_eq!(grants["assets.search"], "a");
+        assert_eq!(grants["market_data.lookup"], "b");
     }
 }
