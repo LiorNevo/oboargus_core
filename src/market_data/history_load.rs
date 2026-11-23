@@ -44,6 +44,8 @@ pub struct HistoryLoadConfig {
     pub preferred_source: Option<String>,
     /// Audit trigger (`"chart"` from the API).
     pub trigger: String,
+    /// Owner recorded on the audit row.
+    pub owner_id: String,
 }
 
 /// The execution report of one bounded history load.
@@ -193,7 +195,18 @@ pub async fn run_asset_history_load(
         range_from: Some(config.from),
         range_to: Some(config.to),
         range_concurrency: None,
+        owner_id: config.owner_id.clone(),
     };
+    crate::temporal::observations::ensure_market_observation_partitions(
+        pool,
+        config.from,
+        config.to,
+    )
+    .await
+    .map_err(|error| {
+        MarketDataProviderError::Infrastructure(format!("observation partitions: {error}"))
+    })?;
+
     let run = start_load_run_with_context(
         pool,
         &config.trigger,
@@ -354,6 +367,7 @@ mod tests {
             to: today,
             preferred_source: None,
             trigger: "test".into(),
+            owner_id: "dev-user".into(),
         };
         assert!(validate(&base).is_ok());
         assert!(

@@ -70,16 +70,87 @@ pub struct IdentifierRangeLoadConfig {
     pub default_currency: String,
 }
 
-/// One date's section of the range report.
+/// One date's summary line in the range report.
 ///
-/// Implements FR-014 of spec 018.
+/// The full per-identifier report is persisted on that date's
+/// `reference_data_load_runs` row before the summary is retained, so a range
+/// keeps `concurrency × summaries` in memory instead of one full report per
+/// date (NFR-001 / FR-013).
+///
+/// Implements FR-013 of `specs/034-production-hardening/spec.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct DateLoadSection {
-    /// The date this section covers.
+pub struct DateLoadSummary {
+    /// The date this summary covers.
     pub date: NaiveDate,
-    /// The complete single-date execution report for that date.
-    pub report: IdentifierLoadReport,
+    /// That date's audit row id (`None` for a dry run).
+    pub run_id: Option<Uuid>,
+    /// That date's terminal status.
+    pub status: RunStatus,
+    /// Identifier-lines that reached the fetch stage.
+    pub identifiers_attempted: usize,
+    /// A row was written.
+    pub loaded: usize,
+    /// The identical fact was already known.
+    pub no_op: usize,
+    /// No asset claims the identifier.
+    pub not_resolved: usize,
+    /// The source holds no value for that date.
+    pub no_data_for_date: usize,
+    /// No enabled source claims the identifier's scheme.
+    pub unsupported_scheme: usize,
+    /// The source refused the request.
+    pub rejected: usize,
+    /// A transient or infrastructure failure.
+    pub source_unavailable: usize,
+    /// The source's budget was exhausted.
+    pub rate_limited: usize,
+    /// The store refused the write.
+    pub storage_failure: usize,
+    /// Assets created by this date.
+    pub assets_created: usize,
+    /// Assets adopted by this date.
+    pub assets_adopted: usize,
+    /// Per-source attempt counts for this date.
+    pub per_source_attempted: std::collections::BTreeMap<String, usize>,
+    /// Per-source failure counts for this date.
+    pub per_source_failed: std::collections::BTreeMap<String, usize>,
+    /// When the date's run started.
+    pub started_at: chrono::DateTime<Utc>,
+    /// When the date's run ended.
+    pub ended_at: chrono::DateTime<Utc>,
+    /// The date run's wall-clock duration.
+    pub duration_ms: u64,
+}
+
+impl DateLoadSummary {
+    /// Collapses a full per-date report into its bounded summary.
+    ///
+    /// Implements FR-013 of `specs/034-production-hardening/spec.md`.
+    pub fn from_report(date: NaiveDate, report: IdentifierLoadReport) -> Self {
+        Self {
+            date,
+            run_id: report.run_id,
+            status: report.status,
+            identifiers_attempted: report.identifiers_attempted,
+            loaded: report.loaded,
+            no_op: report.no_op,
+            not_resolved: report.not_resolved,
+            no_data_for_date: report.no_data_for_date,
+            unsupported_scheme: report.unsupported_scheme,
+            rejected: report.rejected,
+            source_unavailable: report.source_unavailable,
+            rate_limited: report.rate_limited,
+            storage_failure: report.storage_failure,
+            assets_created: report.assets_created,
+            assets_adopted: report.assets_adopted,
+            per_source_attempted: report.per_source_attempted,
+            per_source_failed: report.per_source_failed,
+            started_at: report.started_at,
+            ended_at: report.ended_at,
+            duration_ms: report.duration_ms,
+        }
+    }
 }
 
 /// The range report's summed counters.
@@ -136,10 +207,16 @@ pub struct IdentifierRangeLoadReport {
     pub to: NaiveDate,
     /// The size-`x` window the run used.
     pub concurrency: usize,
-    /// The worst status across the dates (`failed` > `partial` > `complete`).
+    /// The range's terminal status (`complete`, `partial`, `failed`,
+    /// `cancelled`; `interrupted` only when read from history).
     pub status: RunStatus,
-    /// The number of calendar days in `from..=to`.
+    /// The number of calendar days in `from..=to` (never the completed
+    /// count — FR-017).
     pub dates_requested: usize,
+    /// Dates whose outcome is durably recorded.
+    pub dates_completed: usize,
+    /// Dates whose outcome is a failure.
+    pub dates_failed: usize,
     /// Dates whose section wrote at least one row (`loaded > 0`).
     pub dates_with_loads: usize,
     /// Dates whose section neither wrote nor confirmed a row
@@ -149,8 +226,8 @@ pub struct IdentifierRangeLoadReport {
     pub totals: RangeLoadTotals,
     /// One run-audit id per date, in date order (`null` for a dry run).
     pub run_ids: Vec<Option<Uuid>>,
-    /// The per-date sections, in ascending date order.
-    pub dates: Vec<DateLoadSection>,
+    /// The per-date summaries, in ascending date order.
+    pub dates: Vec<DateLoadSummary>,
     /// When the range run started.
     pub started_at: chrono::DateTime<Utc>,
     /// When the range run ended.
@@ -223,6 +300,34 @@ pub async fn run_identifier_range_load_with_group_cancellable(
     data_domain: DataDomain,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
+    run_identifier_range_load_with_group_cancellable_owned(
+        pool,
+        registry,
+        config,
+        group_id,
+        data_domain,
+        cancel,
+        "dev-user",
+    )
+    .await
+}
+
+/// Range load with a cooperative cancellation flag and an explicit owner.
+///
+/// The server passes the authenticated actor's owner id; legacy callers keep
+/// the `dev-user` owner through the wrapper above.
+///
+/// Implements FR-016 / FR-018 of `specs/034-production-hardening/spec.md`.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_identifier_range_load_with_group_cancellable_owned(
+    pool: Option<&sqlx::PgPool>,
+    registry: &DataSourceRegistry,
+    config: IdentifierRangeLoadConfig,
+    group_id: Uuid,
+    data_domain: DataDomain,
+    cancel: Option<Arc<AtomicBool>>,
+    owner_id: &str,
+) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
     let snapshot = registry.snapshot();
     run_identifier_range_load_with_snapshot_cancellable(
         pool,
@@ -231,6 +336,7 @@ pub async fn run_identifier_range_load_with_group_cancellable(
         group_id,
         data_domain,
         cancel,
+        owner_id,
     )
     .await
 }
@@ -254,6 +360,7 @@ pub async fn run_identifier_range_load_with_snapshot(
         group_id,
         data_domain,
         None,
+        "dev-user",
     )
     .await
 }
@@ -265,59 +372,79 @@ async fn run_identifier_range_load_with_snapshot_cancellable(
     group_id: Uuid,
     data_domain: DataDomain,
     cancel: Option<Arc<AtomicBool>>,
+    owner_id: &str,
 ) -> Result<IdentifierRangeLoadReport, MarketDataProviderError> {
     validate_range_request_with_snapshot(&config, snapshot)?;
 
-    let dates = enumerate_dates(config.from, config.to);
+    if let Some(pool) = pool {
+        crate::temporal::observations::ensure_market_observation_partitions(
+            pool,
+            config.from,
+            config.to,
+        )
+        .await
+        .map_err(|error| {
+            MarketDataProviderError::Infrastructure(format!("observation partitions: {error}"))
+        })?;
+    }
+
+    let requested_dates = enumerate_dates(config.from, config.to);
+    let dates_requested = requested_dates.len();
     let started_at = Utc::now();
     let range_from = config.from;
     let range_to = config.to;
     let concurrency = config.concurrency;
 
-    let mut results: Vec<(
-        NaiveDate,
-        Result<IdentifierLoadReport, MarketDataProviderError>,
-    )> = stream::iter(dates.into_iter().map(|date| {
-        let per_date = config_for_date(&config, date);
-        let per_date_context = LoadRunContext::range(
-            data_domain,
-            date,
-            group_id,
-            range_from,
-            range_to,
-            concurrency as i32,
-        );
-        let cancel = cancel.clone();
-        async move {
-            if cancel
-                .as_ref()
-                .is_some_and(|flag| flag.load(Ordering::Relaxed))
-            {
-                return None;
-            }
-            Some((
+    // Each date collapses to a summary as soon as its child report exists, so
+    // peak memory is `concurrency × identifiers`, never
+    // `dates × identifiers` (NFR-001).
+    let mut results: Vec<(NaiveDate, Result<DateLoadSummary, MarketDataProviderError>)> =
+        stream::iter(requested_dates.into_iter().map(|date| {
+            let per_date = config_for_date(&config, date);
+            let per_date_context = LoadRunContext::range(
+                data_domain,
                 date,
-                run_identifier_load_with_snapshot(pool, snapshot, per_date, &per_date_context)
-                    .await,
-            ))
-        }
-    }))
-    .buffer_unordered(concurrency)
-    .filter_map(|item| async move { item })
-    .collect()
-    .await;
+                group_id,
+                range_from,
+                range_to,
+                concurrency as i32,
+            )
+            .with_owner(owner_id);
+            let cancel = cancel.clone();
+            async move {
+                if cancel
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+                {
+                    return None;
+                }
+                Some((
+                    date,
+                    run_identifier_load_with_snapshot(pool, snapshot, per_date, &per_date_context)
+                        .await
+                        .map(|report| DateLoadSummary::from_report(date, report)),
+                ))
+            }
+        }))
+        .buffer_unordered(concurrency)
+        .filter_map(|item| async move { item })
+        .collect()
+        .await;
 
     // `buffer_unordered` yields in completion order; the report must be in
     // date order so two runs are comparable line for line.
     results.sort_by_key(|(date, _)| *date);
 
     let ended_at = Utc::now();
+    let cancelled = cancel
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::Relaxed));
 
-    let mut sections: Vec<DateLoadSection> = Vec::with_capacity(results.len());
+    let mut summaries: Vec<DateLoadSummary> = Vec::with_capacity(results.len());
     let mut first_error: Option<MarketDataProviderError> = None;
-    for (date, result) in results {
+    for (_date, result) in results {
         match result {
-            Ok(report) => sections.push(DateLoadSection { date, report }),
+            Ok(summary) => summaries.push(summary),
             Err(error) => {
                 if first_error.is_none() {
                     first_error = Some(error);
@@ -325,7 +452,10 @@ async fn run_identifier_range_load_with_snapshot_cancellable(
             }
         }
     }
+
     if let Some(error) = first_error {
+        // Dates already processed are persisted; retrying is safe. The
+        // caller finalizes the group from those persisted dates.
         return Err(error);
     }
 
@@ -333,7 +463,9 @@ async fn run_identifier_range_load_with_snapshot_cancellable(
         config.from,
         config.to,
         config.concurrency,
-        sections,
+        dates_requested,
+        summaries,
+        cancelled,
         started_at,
         ended_at,
         data_domain,
@@ -424,13 +556,15 @@ fn config_for_date(config: &IdentifierRangeLoadConfig, date: NaiveDate) -> Ident
 
 /// Assembles the range report and its rollups.
 ///
-/// Implements FR-014 of spec 018.
+/// Implements FR-014 of spec 018 and FR-013 / FR-017 of spec 034.
 #[allow(clippy::too_many_arguments)]
 fn build_range_report(
     from: NaiveDate,
     to: NaiveDate,
     concurrency: usize,
-    sections: Vec<DateLoadSection>,
+    dates_requested: usize,
+    summaries: Vec<DateLoadSummary>,
+    cancelled: bool,
     started_at: chrono::DateTime<Utc>,
     ended_at: chrono::DateTime<Utc>,
     data_domain: DataDomain,
@@ -439,35 +573,36 @@ fn build_range_report(
     let mut totals = RangeLoadTotals::default();
     let mut dates_with_loads = 0usize;
     let mut dates_with_nothing_stored = 0usize;
+    let mut dates_failed = 0usize;
 
-    for section in &sections {
-        let report = &section.report;
-        totals.identifiers_attempted += report.identifiers_attempted;
-        totals.loaded += report.loaded;
-        totals.no_op += report.no_op;
-        totals.not_resolved += report.not_resolved;
-        totals.no_data_for_date += report.no_data_for_date;
-        totals.unsupported_scheme += report.unsupported_scheme;
-        totals.rejected += report.rejected;
-        totals.source_unavailable += report.source_unavailable;
-        totals.rate_limited += report.rate_limited;
-        totals.storage_failure += report.storage_failure;
-        totals.assets_created += report.assets_created;
-        totals.assets_adopted += report.assets_adopted;
+    for summary in &summaries {
+        totals.identifiers_attempted += summary.identifiers_attempted;
+        totals.loaded += summary.loaded;
+        totals.no_op += summary.no_op;
+        totals.not_resolved += summary.not_resolved;
+        totals.no_data_for_date += summary.no_data_for_date;
+        totals.unsupported_scheme += summary.unsupported_scheme;
+        totals.rejected += summary.rejected;
+        totals.source_unavailable += summary.source_unavailable;
+        totals.rate_limited += summary.rate_limited;
+        totals.storage_failure += summary.storage_failure;
+        totals.assets_created += summary.assets_created;
+        totals.assets_adopted += summary.assets_adopted;
 
-        if report.loaded > 0 {
+        if summary.status == RunStatus::Failed {
+            dates_failed += 1;
+        }
+        if summary.loaded > 0 {
             dates_with_loads += 1;
         }
-        if report.loaded == 0 && report.no_op == 0 {
+        if summary.loaded == 0 && summary.no_op == 0 {
             dates_with_nothing_stored += 1;
         }
     }
 
-    let status = aggregate_status(&sections);
-    let run_ids = sections
-        .iter()
-        .map(|section| section.report.run_id)
-        .collect();
+    let dates_completed = summaries.len();
+    let status = derive_range_status(dates_requested, &summaries, cancelled);
+    let run_ids = summaries.iter().map(|summary| summary.run_id).collect();
 
     IdentifierRangeLoadReport {
         report_version: 1,
@@ -477,35 +612,53 @@ fn build_range_report(
         to,
         concurrency,
         status,
-        dates_requested: sections.len(),
+        dates_requested,
+        dates_completed,
+        dates_failed,
         dates_with_loads,
         dates_with_nothing_stored,
         totals,
         run_ids,
-        dates: sections,
+        dates: summaries,
         started_at,
         ended_at,
         duration_ms: (ended_at - started_at).num_milliseconds().max(0) as u64,
     }
 }
 
-/// The worst date status wins.
+/// Derives the range status from the persisted dates and the stop marker.
 ///
-/// Implements FR-014 of spec 018.
-fn aggregate_status(sections: &[DateLoadSection]) -> RunStatus {
-    if sections
+/// `complete` wins when every requested date persisted with no failed date,
+/// even if a late stop arrived (FR-018). Otherwise an accepted stop with
+/// missing dates is `cancelled`; no persisted date is `failed`; anything else
+/// is `partial`.
+///
+/// Implements FR-017 of `specs/034-production-hardening/spec.md`.
+fn derive_range_status(
+    dates_requested: usize,
+    summaries: &[DateLoadSummary],
+    cancelled: bool,
+) -> RunStatus {
+    let dates_completed = summaries.len();
+    let failed_dates = summaries
         .iter()
-        .any(|section| section.report.status == RunStatus::Failed)
-    {
+        .filter(|summary| summary.status == RunStatus::Failed)
+        .count();
+    let partial_dates = summaries
+        .iter()
+        .filter(|summary| summary.status == RunStatus::Partial)
+        .count();
+
+    if dates_completed == dates_requested && failed_dates == 0 && partial_dates == 0 {
+        return RunStatus::Complete;
+    }
+    if cancelled && dates_completed < dates_requested {
+        return RunStatus::Cancelled;
+    }
+    if dates_completed == 0 {
         return RunStatus::Failed;
     }
-    if sections
-        .iter()
-        .any(|section| section.report.status == RunStatus::Partial)
-    {
-        return RunStatus::Partial;
-    }
-    RunStatus::Complete
+    RunStatus::Partial
 }
 
 #[cfg(test)]
@@ -518,7 +671,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     use crate::market_data::data_domain::DataDomain;
-    use crate::market_data::load::{DEFAULT_ASSET_CURRENCY, LoadOutcome};
+    use crate::market_data::load::DEFAULT_ASSET_CURRENCY;
     use crate::market_data::trait_::MarketDataProvider;
     use crate::market_data::types::{
         HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, PriceBar,
@@ -672,11 +825,12 @@ mod tests {
                 .expect("report");
 
         assert_eq!(report.dates_requested, 5);
+        assert_eq!(report.dates_completed, 5);
         assert_eq!(report.dates.len(), 5);
-        let dates: Vec<NaiveDate> = report.dates.iter().map(|section| section.date).collect();
+        let dates: Vec<NaiveDate> = report.dates.iter().map(|summary| summary.date).collect();
         let mut sorted = dates.clone();
         sorted.sort();
-        assert_eq!(dates, sorted, "sections are in date order");
+        assert_eq!(dates, sorted, "summaries are in date order");
         assert_eq!(report.status, RunStatus::Complete);
         assert_eq!(report.run_ids.len(), 5);
         assert!(report.run_ids.iter().all(Option::is_none));
@@ -705,20 +859,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_dry_run_marks_creation_as_would_attempt_only_when_eligible() {
+    async fn a_dry_run_keeps_the_full_requested_count_and_no_creation_effects() {
         let mut config = config("2026-10-01", "2026-10-02", 2);
         config.create_missing_assets = true;
         let report = run_identifier_range_load(None, &registry(), config)
             .await
             .expect("report");
-        for section in &report.dates {
-            for line in &section.report.identifiers {
-                assert_eq!(
-                    line.asset_creation,
-                    crate::market_data::load::AssetCreation::WouldAttempt
-                );
-                assert_eq!(line.outcome, LoadOutcome::NotResolved);
-            }
+        for summary in &report.dates {
+            assert_eq!(
+                summary.assets_created, 0,
+                "a dry run never records a creation side effect"
+            );
         }
         assert_eq!(report.totals.assets_created, 0);
     }
@@ -739,7 +890,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancellation_before_the_first_date_skips_every_date() {
+    async fn cancellation_before_the_first_date_keeps_the_requested_range() {
         let cancel = Arc::new(AtomicBool::new(true));
         let report = run_identifier_range_load_with_group_cancellable(
             None,
@@ -752,8 +903,9 @@ mod tests {
         .await
         .expect("report");
         assert_eq!(report.dates.len(), 0);
-        assert_eq!(report.dates_requested, 0);
-        assert_eq!(report.status, RunStatus::Complete);
+        assert_eq!(report.dates_requested, 5);
+        assert_eq!(report.dates_completed, 0);
+        assert_eq!(report.status, RunStatus::Cancelled);
     }
 
     #[tokio::test]
@@ -779,5 +931,83 @@ mod tests {
             .await
             .expect_err("infrastructure error");
         assert!(matches!(error, MarketDataProviderError::Infrastructure(_)));
+    }
+
+    fn summary(status: RunStatus) -> DateLoadSummary {
+        DateLoadSummary {
+            date: date("2026-10-01"),
+            run_id: None,
+            status,
+            identifiers_attempted: 0,
+            loaded: 0,
+            no_op: 0,
+            not_resolved: 0,
+            no_data_for_date: 0,
+            unsupported_scheme: 0,
+            rejected: 0,
+            source_unavailable: 0,
+            rate_limited: 0,
+            storage_failure: 0,
+            assets_created: 0,
+            assets_adopted: 0,
+            per_source_attempted: std::collections::BTreeMap::new(),
+            per_source_failed: std::collections::BTreeMap::new(),
+            started_at: Utc::now(),
+            ended_at: Utc::now(),
+            duration_ms: 0,
+        }
+    }
+
+    #[test]
+    fn the_range_status_is_derived_from_persisted_dates_and_the_stop_marker() {
+        let three_complete = || {
+            vec![
+                summary(RunStatus::Complete),
+                summary(RunStatus::Complete),
+                summary(RunStatus::Complete),
+            ]
+        };
+        assert_eq!(
+            derive_range_status(3, &three_complete(), false),
+            RunStatus::Complete
+        );
+        assert_eq!(
+            derive_range_status(3, &three_complete(), true),
+            RunStatus::Complete,
+            "a late stop does not relabel a fully persisted run"
+        );
+        assert_eq!(
+            derive_range_status(3, &[summary(RunStatus::Complete)], true),
+            RunStatus::Cancelled
+        );
+        assert_eq!(derive_range_status(3, &[], false), RunStatus::Failed);
+        assert_eq!(
+            derive_range_status(3, &[summary(RunStatus::Complete)], false),
+            RunStatus::Partial
+        );
+        assert_eq!(
+            derive_range_status(
+                3,
+                &[
+                    summary(RunStatus::Complete),
+                    summary(RunStatus::Partial),
+                    summary(RunStatus::Complete)
+                ],
+                false
+            ),
+            RunStatus::Partial
+        );
+        assert_eq!(
+            derive_range_status(
+                3,
+                &[
+                    summary(RunStatus::Failed),
+                    summary(RunStatus::Complete),
+                    summary(RunStatus::Complete)
+                ],
+                false
+            ),
+            RunStatus::Partial
+        );
     }
 }

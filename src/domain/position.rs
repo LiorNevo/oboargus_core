@@ -6,6 +6,7 @@
 pub mod entity;
 pub mod materialize;
 pub mod read;
+pub mod rebuild;
 pub mod replay;
 
 #[cfg(test)]

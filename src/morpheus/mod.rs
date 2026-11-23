@@ -14,6 +14,8 @@ pub mod error;
 pub mod model;
 /// Owner-scoped SQL.
 pub mod persistence;
+/// Conversation/message retention pruning.
+pub mod retention;
 /// Deterministic conversation titles.
 pub mod title;
 /// Governed tool catalog.

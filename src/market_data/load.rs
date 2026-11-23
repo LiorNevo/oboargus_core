@@ -273,6 +273,24 @@ pub enum RunStatus {
     Partial,
     /// Every attempted identifier ended in a failure bucket.
     Failed,
+    /// An accepted stop ended the run with dates still missing.
+    Cancelled,
+    /// Startup recovery or the stale cutoff ended the run with dates missing.
+    Interrupted,
+}
+
+impl RunStatus {
+    /// The wire/status label used by the audit tables and history views.
+    /// Implements FR-016 of `specs/034-production-hardening/spec.md`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Partial => "partial",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Interrupted => "interrupted",
+        }
+    }
 }
 
 /// Per-run counters: one field per outcome bucket, plus the two creation
@@ -519,6 +537,16 @@ pub async fn run_identifier_load_with_snapshot(
         )
     })?;
 
+    crate::temporal::observations::ensure_market_observation_partitions(
+        pool,
+        config.as_of_date,
+        config.as_of_date,
+    )
+    .await
+    .map_err(|error| {
+        MarketDataProviderError::Infrastructure(format!("observation partitions: {error}"))
+    })?;
+
     let run_row = start_load_run_with_context(
         pool,
         &config.trigger,
@@ -532,6 +560,11 @@ pub async fn run_identifier_load_with_snapshot(
     let mut per_source_failed: BTreeMap<String, usize> = BTreeMap::new();
     let mut lines: Vec<LoadIdentifierOutcome> = Vec::with_capacity(unique.len());
 
+    // shortcut: the fact writer is pool-scoped and does not yet accept a
+    // transaction, so a date's reference rows and its terminal audit update
+    // cannot share one database transaction. The date is still closed as a
+    // terminal child on every exit path; upgrade when
+    // `temporal::facts::write` accepts an executor/transaction.
     for identifier in &unique {
         let line = process_identifier(
             pool,
@@ -547,14 +580,35 @@ pub async fn run_identifier_load_with_snapshot(
     }
 
     let ended_at = Utc::now();
-    let per_identifier = serde_json::to_value(&lines)
-        .map_err(|e| MarketDataProviderError::Infrastructure(format!("json encode lines: {e}")))?;
-    let per_source_attempted_value = serde_json::to_value(&per_source_attempted)
-        .map_err(|e| MarketDataProviderError::Infrastructure(format!("json encode: {e}")))?;
-    let per_source_failed_value = serde_json::to_value(&per_source_failed)
-        .map_err(|e| MarketDataProviderError::Infrastructure(format!("json encode: {e}")))?;
+    let per_identifier = match serde_json::to_value(&lines) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = crate::market_data::audit::fail_load_run(pool, run_row.id, "failed").await;
+            return Err(MarketDataProviderError::Infrastructure(format!(
+                "json encode lines: {error}"
+            )));
+        }
+    };
+    let per_source_attempted_value = match serde_json::to_value(&per_source_attempted) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = crate::market_data::audit::fail_load_run(pool, run_row.id, "failed").await;
+            return Err(MarketDataProviderError::Infrastructure(format!(
+                "json encode: {error}"
+            )));
+        }
+    };
+    let per_source_failed_value = match serde_json::to_value(&per_source_failed) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = crate::market_data::audit::fail_load_run(pool, run_row.id, "failed").await;
+            return Err(MarketDataProviderError::Infrastructure(format!(
+                "json encode: {error}"
+            )));
+        }
+    };
 
-    finish_load_run(
+    if let Err(error) = finish_load_run(
         pool,
         run_row.id,
         requested_raw as i32,
@@ -564,7 +618,13 @@ pub async fn run_identifier_load_with_snapshot(
         &per_source_failed_value,
         &per_identifier,
     )
-    .await?;
+    .await
+    {
+        // The date's terminal audit update is its persistence boundary: if
+        // it cannot be written, the child must not stay `running`.
+        let _ = crate::market_data::audit::fail_load_run(pool, run_row.id, "failed").await;
+        return Err(error);
+    }
 
     Ok(build_report(
         &counters,

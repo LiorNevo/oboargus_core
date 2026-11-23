@@ -11,18 +11,12 @@ pub mod catalog;
 pub mod error;
 /// Typed append-only facts for assets, issuers, and portfolios.
 pub mod facts;
-/// Feed orchestration and stream adaptation.
-pub mod ingest;
 /// The UTC instant newtypes and the precision guard.
 pub mod instant;
 /// Typed market observations (EOD bars, intraday bars, quotes).
 pub mod observations;
-/// Position and valuation history.
-pub mod positions;
 /// Bitemporal resolution: the single winner-selection rule.
 pub mod resolution;
-/// Retention, rollup, and archive-aware reads.
-pub mod retention;
 /// Operator-facing integrity checks.
 pub mod verify;
 

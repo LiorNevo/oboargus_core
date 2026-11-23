@@ -14,7 +14,7 @@ use serde::Serialize;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::market_data::audit::LoadRunRow;
+use crate::market_data::audit::{LoadRangeGroupRow, LoadRunRow, get_load_range_group};
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::load::{IdentifierLoadReport, LoadIdentifierOutcome, RunStatus};
@@ -33,10 +33,13 @@ pub struct HistoryFilter {
     /// Requested source, answering source, or source-change source.
     pub source: Option<String>,
     /// Derived status (`complete`, `partial`, `failed`, `running`,
-    /// `incomplete`, `source_enabled`, `source_disabled`).
+    /// `cancelled`, `interrupted`, `incomplete`, `source_enabled`,
+    /// `source_disabled`).
     pub status: Option<String>,
     /// `load_run`, `range_run`, `source_change`, or `run`.
     pub entry_type: Option<String>,
+    /// Owner scope (`None` for legacy/dev reads).
+    pub owner_id: Option<String>,
     /// Page size (`1..=200`).
     pub limit: i64,
     /// Offset.
@@ -287,13 +290,11 @@ type ProgressAggregate = (
     i64,
     i64,
     i64,
+    i64,
+    i64,
     Option<DateTime<Utc>>,
     Option<DateTime<Utc>>,
-    Option<NaiveDate>,
-    Option<NaiveDate>,
 );
-
-type ProgressChild = (bool, Option<DateTime<Utc>>, i32, i32, i32, i32, i32);
 
 const HISTORY_SELECT: &str = "SELECT entry_id, entry_type, started_at, ended_at, \
     data_domain, requested_source, answering_sources, identifiers_requested_raw, \
@@ -314,7 +315,9 @@ const HISTORY_FILTER: &str = " WHERE ($1::date IS NULL OR started_at >= $1::date
          OR ($5 = 'running' AND status = 'running' AND started_at >= NOW() - ($7::double precision * INTERVAL '1 second')) \
          OR ($5 NOT IN ('incomplete', 'running') AND status = $5)) \
     AND ($6::text IS NULL OR entry_type = $6 \
-         OR ($6 = 'run' AND entry_type IN ('load_run', 'range_run')))";
+         OR ($6 = 'run' AND entry_type IN ('load_run', 'range_run'))) \
+    AND ($10::text IS NULL OR owner_id = $10 \
+         OR (entry_type = 'source_change' AND owner_id IS NULL))";
 
 /// Lists history entries, newest first.
 /// Implements FR-026 / FR-028..FR-031 of spec 022.
@@ -338,6 +341,7 @@ pub async fn list_history(
         .bind(stale_after_seconds)
         .bind(limit)
         .bind(offset)
+        .bind(&filter.owner_id)
         .fetch_all(pool)
         .await
         .map_err(|e| MarketDataProviderError::Infrastructure(format!("list_history: {e}")))?;
@@ -351,6 +355,11 @@ pub async fn list_history(
         .bind(&filter.status)
         .bind(&filter.entry_type)
         .bind(stale_after_seconds)
+        // The shared filter numbers the owner predicate `$10`; the count
+        // query has no LIMIT/OFFSET, so keep the two placeholders bound.
+        .bind(None::<i64>)
+        .bind(None::<i64>)
+        .bind(&filter.owner_id)
         .fetch_one(pool)
         .await
         .map_err(|e| MarketDataProviderError::Infrastructure(format!("count_history: {e}")))?;
@@ -418,9 +427,28 @@ pub async fn get_history_entry(
     entry_id: Uuid,
     stale_after_seconds: i64,
 ) -> Result<LoadHistoryEntry, MarketDataProviderError> {
-    let sql = format!("{HISTORY_SELECT} WHERE entry_id = $1");
+    get_history_entry_for_owner(pool, entry_id, stale_after_seconds, None).await
+}
+
+/// Reads one history entry, optionally scoped to an owner.
+///
+/// A cross-owner id is indistinguishable from an unknown id (`NotFound`).
+///
+/// Implements FR-006 / FR-018 of `specs/034-production-hardening/spec.md`.
+pub async fn get_history_entry_for_owner(
+    pool: &sqlx::PgPool,
+    entry_id: Uuid,
+    stale_after_seconds: i64,
+    owner_id: Option<&str>,
+) -> Result<LoadHistoryEntry, MarketDataProviderError> {
+    let sql = format!(
+        "{HISTORY_SELECT} WHERE entry_id = $1 \
+         AND ($2::text IS NULL OR owner_id = $2 \
+              OR (entry_type = 'source_change' AND owner_id IS NULL))"
+    );
     let row: Option<HistoryRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(entry_id)
+        .bind(owner_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| MarketDataProviderError::Infrastructure(format!("get_history_entry: {e}")))?;
@@ -435,7 +463,19 @@ pub async fn get_history_detail(
     entry_id: Uuid,
     stale_after_seconds: i64,
 ) -> Result<LoadHistoryDetail, MarketDataProviderError> {
-    let entry = get_history_entry(pool, entry_id, stale_after_seconds).await?;
+    get_history_detail_for_owner(pool, entry_id, stale_after_seconds, None).await
+}
+
+/// Reads full detail for one entry, optionally scoped to an owner.
+///
+/// Implements FR-006 / FR-018 of `specs/034-production-hardening/spec.md`.
+pub async fn get_history_detail_for_owner(
+    pool: &sqlx::PgPool,
+    entry_id: Uuid,
+    stale_after_seconds: i64,
+    owner_id: Option<&str>,
+) -> Result<LoadHistoryDetail, MarketDataProviderError> {
+    let entry = get_history_entry_for_owner(pool, entry_id, stale_after_seconds, owner_id).await?;
     match entry.entry_type.as_str() {
         "load_run" => {
             if entry.ended_at.is_none() {
@@ -457,7 +497,8 @@ pub async fn get_history_detail(
         }
         "range_run" => {
             let rows = get_group_rows(pool, entry_id).await?;
-            let range = range_from_rows(&entry, rows)?;
+            let group = get_load_range_group(pool, entry_id).await.ok();
+            let range = range_from_rows(&entry, rows, group.as_ref())?;
             Ok(LoadHistoryDetail {
                 entry,
                 load: None,
@@ -498,7 +539,8 @@ async fn get_group_rows(
          rejected, source_unavailable, rate_limited, storage_failure, \
          assets_created, assets_adopted, per_source_attempted, per_source_failed, \
          per_identifier, duration_ms, data_domain, as_of_date, range_group_id, \
-         range_from, range_to, range_concurrency, answering_sources \
+         range_from, range_to, range_concurrency, answering_sources, owner_id, \
+         terminal_status \
          FROM reference_data_load_runs WHERE range_group_id = $1 \
          ORDER BY as_of_date ASC, started_at ASC",
     )
@@ -582,6 +624,7 @@ fn report_from_row(
 fn range_from_rows(
     entry: &LoadHistoryEntry,
     rows: Vec<LoadRunRow>,
+    group: Option<&LoadRangeGroupRow>,
 ) -> Result<RangeRunDetail, MarketDataProviderError> {
     let mut dates = Vec::with_capacity(rows.len());
     let mut totals = RangeLoadTotals::default();
@@ -614,20 +657,33 @@ fn range_from_rows(
             .unwrap_or(row.started_at.date_naive());
         dates.push(DateRunDetail { date, report });
     }
-    let from = entry
-        .date_from
+    let from = group
+        .map(|group| group.from_date)
+        .or(entry.date_from)
         .or_else(|| dates.first().map(|d| d.date))
         .ok_or_else(|| MarketDataProviderError::NotFound("range has no dates".into()))?;
-    let to = entry
-        .date_to
+    let to = group
+        .map(|group| group.to_date)
+        .or(entry.date_to)
         .or_else(|| dates.last().map(|d| d.date))
         .unwrap_or(from);
+    let status = group
+        .map(|group| group.status.as_str())
+        .unwrap_or(entry.status.as_str());
+    let dates_requested = group
+        .map(|group| group.dates_requested.max(0) as usize)
+        .unwrap_or(entry.dates_requested.max(0) as usize);
+    let concurrency = group
+        .map(|group| group.concurrency)
+        .or(entry.range_concurrency)
+        .unwrap_or(1)
+        .max(1) as usize;
     Ok(RangeRunDetail {
         from,
         to,
-        concurrency: entry.range_concurrency.unwrap_or(1).max(1) as usize,
-        status: status_from_str(&entry.status),
-        dates_requested: entry.dates_requested.max(0) as usize,
+        concurrency,
+        status: status_from_str(status),
+        dates_requested,
         dates_completed: entry.dates_completed.max(0) as usize,
         dates_with_loads,
         dates_with_nothing_stored,
@@ -637,22 +693,35 @@ fn range_from_rows(
 }
 
 fn child_status(row: &LoadRunRow) -> &'static str {
-    let failed = row.rejected + row.source_unavailable + row.rate_limited + row.storage_failure;
     if row.ended_at.is_none() {
-        "running"
-    } else if failed == 0 {
-        "complete"
-    } else if failed == row.identifiers_attempted {
-        "failed"
-    } else {
-        "partial"
+        return "running";
+    }
+    match row.terminal_status.as_str() {
+        "complete" => "complete",
+        "partial" => "partial",
+        "failed" => "failed",
+        "interrupted" => "interrupted",
+        "cancelled" => "cancelled",
+        _ => {
+            let failed =
+                row.rejected + row.source_unavailable + row.rate_limited + row.storage_failure;
+            if failed == 0 {
+                "complete"
+            } else if failed == row.identifiers_attempted {
+                "failed"
+            } else {
+                "partial"
+            }
+        }
     }
 }
 
 fn status_from_str(status: &str) -> RunStatus {
     match status {
-        "failed" => RunStatus::Failed,
         "partial" => RunStatus::Partial,
+        "failed" => RunStatus::Failed,
+        "cancelled" => RunStatus::Cancelled,
+        "interrupted" => RunStatus::Interrupted,
         _ => RunStatus::Complete,
     }
 }
@@ -663,41 +732,85 @@ pub async fn range_progress(
     pool: &sqlx::PgPool,
     group_id: Uuid,
 ) -> Result<RangeProgress, MarketDataProviderError> {
-    let row: Option<ProgressAggregate> = sqlx::query_as(
+    match range_progress_for_owner(pool, group_id, None, 7_200).await {
+        Ok(progress) => Ok(progress),
+        Err(MarketDataProviderError::NotFound(_)) => {
+            // Legacy ungrouped ranges (and a client polling before the group
+            // row exists) keep the old child-derived projection.
+            legacy_progress(pool, group_id, None, true).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Legacy child-derived progress for pre-034 ranges.
+async fn legacy_progress(
+    pool: &sqlx::PgPool,
+    group_id: Uuid,
+    owner_id: Option<&str>,
+    starting_when_empty: bool,
+) -> Result<RangeProgress, MarketDataProviderError> {
+    type Aggregate = (
+        i64,
+        i64,
+        i64,
+        Option<DateTime<Utc>>,
+        Option<DateTime<Utc>>,
+        Option<NaiveDate>,
+        Option<NaiveDate>,
+    );
+    let row: Aggregate = sqlx::query_as(
         "SELECT COUNT(*), \
-                    COUNT(*) FILTER (WHERE ended_at IS NOT NULL), \
-                    COUNT(*) FILTER (WHERE loaded > 0), \
-                    MIN(started_at), MAX(COALESCE(ended_at, started_at)), \
-                    MIN(range_from), MAX(range_to) \
-             FROM reference_data_load_runs WHERE range_group_id = $1",
+                COUNT(*) FILTER (WHERE ended_at IS NOT NULL AND terminal_status <> 'interrupted'), \
+                COUNT(*) FILTER (WHERE loaded > 0), \
+                MIN(started_at), MAX(COALESCE(ended_at, started_at)), \
+                MIN(range_from), MAX(range_to) \
+         FROM reference_data_load_runs WHERE range_group_id = $1 \
+           AND ($2::text IS NULL OR owner_id = $2 OR owner_id IS NULL)",
     )
     .bind(group_id)
-    .fetch_optional(pool)
+    .bind(owner_id)
+    .fetch_one(pool)
     .await
-    .map_err(|e| MarketDataProviderError::Infrastructure(format!("range_progress: {e}")))?;
-
-    let Some((total, completed, with_loads, started_at, updated_at, from, to)) = row else {
-        return Ok(starting_progress(group_id));
-    };
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("legacy_progress: {e}")))?;
+    let (total, completed, with_loads, started_at, updated_at, from, to) = row;
     if total == 0 {
-        return Ok(starting_progress(group_id));
+        return if starting_when_empty {
+            Ok(RangeProgress {
+                group_id,
+                status: "starting".to_string(),
+                dates_requested: None,
+                dates_completed: 0,
+                dates_failed: 0,
+                dates_with_loads: 0,
+                started_at: None,
+                updated_at: Utc::now(),
+            })
+        } else {
+            Err(MarketDataProviderError::NotFound(format!(
+                "range group '{group_id}' does not exist"
+            )))
+        };
     }
 
-    let children: Vec<ProgressChild> = sqlx::query_as(
-        "SELECT (ended_at IS NOT NULL), ended_at, rejected, source_unavailable, \
+    type Child = (bool, i32, i32, i32, i32, i32);
+    let children: Vec<Child> = sqlx::query_as(
+        "SELECT (ended_at IS NOT NULL), rejected, source_unavailable, \
                 rate_limited, storage_failure, identifiers_attempted \
-         FROM reference_data_load_runs WHERE range_group_id = $1",
+         FROM reference_data_load_runs WHERE range_group_id = $1 \
+           AND ($2::text IS NULL OR owner_id = $2 OR owner_id IS NULL)",
     )
     .bind(group_id)
+    .bind(owner_id)
     .fetch_all(pool)
     .await
-    .map_err(|e| MarketDataProviderError::Infrastructure(format!("range_progress: {e}")))?;
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("legacy_progress: {e}")))?;
 
     let mut dates_failed = 0usize;
     let mut running = false;
     let mut failed = false;
     let mut partial = false;
-    for (ended, _, rejected, unavailable, limited, storage, attempted) in children {
+    for (ended, rejected, unavailable, limited, storage, attempted) in children {
         if !ended {
             running = true;
             continue;
@@ -735,17 +848,232 @@ pub async fn range_progress(
     })
 }
 
-fn starting_progress(group_id: Uuid) -> RangeProgress {
-    RangeProgress {
-        group_id,
-        status: "starting".to_string(),
-        dates_requested: None,
-        dates_completed: 0,
-        dates_failed: 0,
-        dates_with_loads: 0,
-        started_at: None,
-        updated_at: Utc::now(),
+/// Reads progress for a range group, scoped to an owner and applying the
+/// stale cutoff before returning.
+///
+/// Implements FR-016..FR-020 of `specs/034-production-hardening/spec.md`.
+pub async fn range_progress_for_owner(
+    pool: &sqlx::PgPool,
+    group_id: Uuid,
+    owner_id: Option<&str>,
+    stale_after_seconds: i64,
+) -> Result<RangeProgress, MarketDataProviderError> {
+    let Some(mut group) = load_group_for_owner(pool, group_id, owner_id).await? else {
+        return legacy_progress(pool, group_id, owner_id, false).await;
+    };
+
+    if group.status == "running"
+        && group.ended_at.is_none()
+        && group.started_at < Utc::now() - chrono::Duration::seconds(stale_after_seconds.max(0))
+    {
+        sweep_stale_groups(pool, stale_after_seconds).await?;
+        group = load_group_for_owner(pool, group_id, owner_id)
+            .await?
+            .ok_or_else(|| {
+                MarketDataProviderError::NotFound(format!(
+                    "range group '{group_id}' does not exist"
+                ))
+            })?;
     }
+
+    let aggregate: ProgressAggregate = sqlx::query_as(
+        "SELECT COUNT(*), \
+                COUNT(*) FILTER (WHERE ended_at IS NOT NULL AND terminal_status <> 'interrupted'), \
+                COUNT(*) FILTER (WHERE terminal_status = 'failed'), \
+                COUNT(*) FILTER (WHERE ended_at IS NULL), \
+                COUNT(*) FILTER (WHERE loaded > 0), \
+                MIN(started_at), MAX(COALESCE(ended_at, started_at)) \
+         FROM reference_data_load_runs WHERE range_group_id = $1",
+    )
+    .bind(group_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        MarketDataProviderError::Infrastructure(format!("range_progress aggregate: {e}"))
+    })?;
+
+    let (total, completed, failed, open, with_loads, first_started, last_transition) = aggregate;
+
+    // An accepted stop with no child in flight can be finalized immediately;
+    // the background task may already have exited (for example after a crash
+    // marker was persisted by a previous process).
+    if group.status == "running" && group.cancel_requested_at.is_some() && open == 0 {
+        finalize_group_from_dates(pool, group_id).await?;
+        group = load_group_for_owner(pool, group_id, owner_id)
+            .await?
+            .ok_or_else(|| {
+                MarketDataProviderError::NotFound(format!(
+                    "range group '{group_id}' does not exist"
+                ))
+            })?;
+    }
+
+    let status = if group.status != "running" {
+        group.status.clone()
+    } else if total == 0 {
+        "starting".to_string()
+    } else {
+        "running".to_string()
+    };
+
+    Ok(RangeProgress {
+        group_id,
+        status,
+        dates_requested: Some(group.dates_requested.max(0) as usize),
+        dates_completed: completed as usize,
+        dates_failed: failed as usize,
+        dates_with_loads: with_loads as usize,
+        started_at: Some(group.started_at).or(first_started),
+        updated_at: group.ended_at.or(last_transition).unwrap_or_else(Utc::now),
+    })
+}
+
+async fn load_group_for_owner(
+    pool: &sqlx::PgPool,
+    group_id: Uuid,
+    owner_id: Option<&str>,
+) -> Result<Option<LoadRangeGroupRow>, MarketDataProviderError> {
+    let group = match get_load_range_group(pool, group_id).await {
+        Ok(group) => group,
+        Err(MarketDataProviderError::NotFound(_)) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if let Some(owner_id) = owner_id
+        && group.owner_id != owner_id
+    {
+        return Ok(None);
+    }
+    Ok(Some(group))
+}
+
+/// Finalizes a group from its persisted child dates.
+///
+/// Used by the range task wrapper on every exit path: all dates persisted is
+/// `complete`, an accepted stop with missing dates is `cancelled`, no
+/// persisted date is `failed`, otherwise `partial`.
+///
+/// Implements FR-017 / FR-019 of `specs/034-production-hardening/spec.md`.
+pub async fn finalize_group_from_dates(
+    pool: &sqlx::PgPool,
+    group_id: Uuid,
+) -> Result<Option<String>, MarketDataProviderError> {
+    let status: Option<String> = sqlx::query_scalar(
+        "WITH agg AS (
+            SELECT g.id,
+                   g.dates_requested,
+                   g.cancel_requested_at,
+                   COUNT(c.id) FILTER (WHERE c.ended_at IS NOT NULL AND c.terminal_status <> 'interrupted') AS completed,
+                   COUNT(c.id) FILTER (
+                       WHERE c.ended_at IS NOT NULL
+                         AND c.terminal_status IN ('failed', 'partial')
+                   ) AS failed_dates
+            FROM load_range_groups g
+            LEFT JOIN reference_data_load_runs c ON c.range_group_id = g.id
+            WHERE g.id = $1 AND g.ended_at IS NULL
+            GROUP BY g.id
+         )
+         UPDATE load_range_groups g
+         SET status = CASE
+                 WHEN agg.completed >= agg.dates_requested THEN
+                     CASE WHEN agg.failed_dates = 0 THEN 'complete' ELSE 'partial' END
+                 WHEN agg.cancel_requested_at IS NOT NULL THEN 'cancelled'
+                 WHEN agg.completed = 0 THEN 'failed'
+                 ELSE 'partial'
+             END,
+             ended_at = NOW()
+         FROM agg
+         WHERE g.id = agg.id
+         RETURNING g.status",
+    )
+    .bind(group_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        MarketDataProviderError::Infrastructure(format!("finalize_group_from_dates: {e}"))
+    })?;
+    Ok(status)
+}
+
+/// Finalizes open groups at startup: `complete` when every requested date
+/// persisted, `cancelled` when a stop marker exists, otherwise `interrupted`.
+///
+/// Startup recovery only updates audit/group columns; it never touches
+/// observations.
+///
+/// Implements FR-019 of `specs/034-production-hardening/spec.md`.
+pub async fn finalize_open_groups(pool: &sqlx::PgPool) -> Result<u64, MarketDataProviderError> {
+    let result = sqlx::query(
+        "WITH agg AS (
+            SELECT g.id,
+                   g.dates_requested,
+                   g.cancel_requested_at,
+                   COUNT(c.id) FILTER (WHERE c.ended_at IS NOT NULL AND c.terminal_status <> 'interrupted') AS completed,
+                   COUNT(c.id) FILTER (
+                       WHERE c.ended_at IS NOT NULL
+                         AND c.terminal_status IN ('failed', 'partial')
+                   ) AS failed_dates
+            FROM load_range_groups g
+            LEFT JOIN reference_data_load_runs c ON c.range_group_id = g.id
+            WHERE g.ended_at IS NULL
+            GROUP BY g.id
+         )
+         UPDATE load_range_groups g
+         SET status = CASE
+                 WHEN agg.completed >= agg.dates_requested THEN
+                     CASE WHEN agg.failed_dates = 0 THEN 'complete' ELSE 'partial' END
+                 WHEN agg.cancel_requested_at IS NOT NULL THEN 'cancelled'
+                 ELSE 'interrupted'
+             END,
+             ended_at = NOW()
+         FROM agg
+         WHERE g.id = agg.id AND g.ended_at IS NULL",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("finalize_open_groups: {e}")))?;
+    Ok(result.rows_affected())
+}
+
+/// Finalizes running groups older than the stale cutoff as `interrupted`
+/// (or `complete`/`cancelled` from their persisted dates).
+///
+/// Implements FR-019 of `specs/034-production-hardening/spec.md`.
+pub async fn sweep_stale_groups(
+    pool: &sqlx::PgPool,
+    stale_after_seconds: i64,
+) -> Result<u64, MarketDataProviderError> {
+    let result = sqlx::query(
+        "WITH agg AS (
+            SELECT g.id,
+                   g.dates_requested,
+                   g.cancel_requested_at,
+                   COUNT(c.id) FILTER (WHERE c.ended_at IS NOT NULL AND c.terminal_status <> 'interrupted') AS completed,
+                   COUNT(c.id) FILTER (
+                       WHERE c.ended_at IS NOT NULL
+                         AND c.terminal_status IN ('failed', 'partial')
+                   ) AS failed_dates
+            FROM load_range_groups g
+            LEFT JOIN reference_data_load_runs c ON c.range_group_id = g.id
+            WHERE g.ended_at IS NULL
+              AND g.started_at < NOW() - ($1::double precision * INTERVAL '1 second')
+            GROUP BY g.id
+         )
+         UPDATE load_range_groups g
+         SET status = CASE
+                 WHEN agg.completed >= agg.dates_requested THEN
+                     CASE WHEN agg.failed_dates = 0 THEN 'complete' ELSE 'partial' END
+                 WHEN agg.cancel_requested_at IS NOT NULL THEN 'cancelled'
+                 ELSE 'interrupted'
+             END,
+             ended_at = NOW()
+         FROM agg
+         WHERE g.id = agg.id AND g.ended_at IS NULL",
+    )
+    .bind(stale_after_seconds.max(0))
+    .execute(pool)
+    .await
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("sweep_stale_groups: {e}")))?;
+    Ok(result.rows_affected())
 }
 
 #[cfg(test)]
@@ -829,6 +1157,8 @@ mod tests {
             range_to: None,
             range_concurrency: None,
             answering_sources: vec!["src".to_string()],
+            owner_id: Some("dev-user".to_string()),
+            terminal_status: String::new(),
         }
     }
 
@@ -854,6 +1184,8 @@ mod tests {
         assert_eq!(status_from_str("failed"), RunStatus::Failed);
         assert_eq!(status_from_str("partial"), RunStatus::Partial);
         assert_eq!(status_from_str("complete"), RunStatus::Complete);
+        assert_eq!(status_from_str("cancelled"), RunStatus::Cancelled);
+        assert_eq!(status_from_str("interrupted"), RunStatus::Interrupted);
         assert_eq!(status_from_str("anything-else"), RunStatus::Complete);
     }
 
@@ -901,8 +1233,8 @@ mod tests {
         running.id = Uuid::from_u128(5);
         running.ended_at = None;
 
-        let detail =
-            range_from_rows(&entry, vec![no_op, nothing, loaded, running]).expect("range detail");
+        let detail = range_from_rows(&entry, vec![no_op, nothing, loaded, running], None)
+            .expect("range detail");
         assert_eq!(
             detail.from,
             NaiveDate::from_ymd_opt(2026, 1, 1).expect("date")
@@ -927,7 +1259,7 @@ mod tests {
         let mut entry = history_row().into_entry(at(10), 60);
         entry.date_from = None;
         entry.date_to = None;
-        let error = range_from_rows(&entry, Vec::new()).expect_err("empty");
+        let error = range_from_rows(&entry, Vec::new(), None).expect_err("empty");
         assert!(matches!(error, MarketDataProviderError::NotFound(_)));
     }
 
@@ -946,7 +1278,7 @@ mod tests {
         row.duration_ms = None;
         row.rejected = 1;
         row.identifiers_attempted = 1;
-        let detail = range_from_rows(&entry, vec![row]).expect("range detail");
+        let detail = range_from_rows(&entry, vec![row], None).expect("range detail");
         assert_eq!(detail.concurrency, 1);
         assert_eq!(
             detail.from,

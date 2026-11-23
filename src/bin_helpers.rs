@@ -41,6 +41,8 @@ pub const TABLES: &[&str] = &[
     "positions",
     "events",
     "data_source_refresh_runs",
+    "reference_data_load_runs",
+    "load_range_groups",
     "data_sources",
     "assets",
     "issuers",
@@ -67,6 +69,7 @@ pub const TABLES: &[&str] = &[
     "morpheus_control_leases",
     "morpheus_standing_approvals",
     "morpheus_conversations",
+    "actors",
 ];
 
 /// Tables counted by [`count_high_level_rows`]. Excludes the

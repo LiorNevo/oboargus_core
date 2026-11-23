@@ -813,6 +813,7 @@ async fn run_messages_logs_context_and_audit_lifecycle() {
     let scope = flow.id.to_string();
     persistence::set_context(
         &pool,
+        "run-owner",
         "flow",
         &scope,
         "counter",
@@ -823,6 +824,7 @@ async fn run_messages_logs_context_and_audit_lifecycle() {
     .expect("set flow context");
     persistence::set_context(
         &pool,
+        "run-owner",
         "flow",
         &format!("{scope}:sub-1"),
         "nested",
@@ -831,39 +833,56 @@ async fn run_messages_logs_context_and_audit_lifecycle() {
     )
     .await
     .expect("set subflow context");
-    persistence::set_context(&pool, "global", "shared", "key", &json!("value"), None)
-        .await
-        .expect("set global context");
-    persistence::set_context(&pool, "flow", &scope, "counter", &json!(2), None)
-        .await
-        .expect("update context");
-    let (flow_context, global_context) = persistence::get_context(&pool, &scope, "shared")
-        .await
-        .expect("get context");
+    persistence::set_context(
+        &pool,
+        "run-owner",
+        "global",
+        "shared",
+        "key",
+        &json!("value"),
+        None,
+    )
+    .await
+    .expect("set global context");
+    persistence::set_context(
+        &pool,
+        "run-owner",
+        "flow",
+        &scope,
+        "counter",
+        &json!(2),
+        None,
+    )
+    .await
+    .expect("update context");
+    let (flow_context, global_context) =
+        persistence::get_context(&pool, "run-owner", &scope, "shared")
+            .await
+            .expect("get context");
     assert_eq!(flow_context.len(), 1);
     assert_eq!(flow_context[0].value, json!(2));
     assert_eq!(global_context.len(), 1);
     assert_eq!(
-        persistence::get_scoped_flow_context(&pool, &scope)
+        persistence::get_scoped_flow_context(&pool, "run-owner", &scope)
             .await
             .expect("scoped context")
             .len(),
         2
     );
-    persistence::delete_context(&pool, "flow", &scope)
+    persistence::delete_context(&pool, "run-owner", "flow", &scope)
         .await
         .expect("delete flow context");
     assert!(
-        persistence::get_scoped_flow_context(&pool, &scope)
+        persistence::get_scoped_flow_context(&pool, "run-owner", &scope)
             .await
             .expect("deleted flow context")
             .is_empty()
     );
-    persistence::delete_context(&pool, "global", "shared")
+    persistence::delete_context(&pool, "run-owner", "global", "shared")
         .await
         .expect("delete global context");
     assert!(
-        persistence::get_context(&pool, &scope, "shared")
+        persistence::get_context(&pool, "run-owner", &scope, "shared")
             .await
             .expect("deleted global context")
             .1

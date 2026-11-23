@@ -6,10 +6,13 @@
 //! in `(priority ASC, source_id ASC)` order, applying the failover policy
 //! (Transient / RateLimited fall over; the rest are final).
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::future::Future;
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::Duration;
 
 use serde::Serialize;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
@@ -18,6 +21,211 @@ use crate::market_data::types::{
     HistoricalRange, HistoricalRangeRequest, LatestBar, LatestBarRequest, TickerLookupHit,
     TickerLookupRequest, TickerLookupResult,
 };
+
+/// The default global and per-provider concurrent call limit.
+///
+/// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+pub const DEFAULT_PROVIDER_MAX_CONCURRENCY: usize = 4;
+
+/// The default maximum provider attempts per identifier/date.
+///
+/// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+pub const DEFAULT_PROVIDER_MAX_ATTEMPTS: u32 = 3;
+
+/// The default exponential backoff cap.
+///
+/// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+pub const DEFAULT_PROVIDER_MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// The largest provider `Retry-After` the budget honors.
+///
+/// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+pub const RETRY_AFTER_CAP: Duration = Duration::from_secs(60);
+
+/// Shared provider call budget: a global and per-provider semaphore plus a
+/// bounded retry/backoff policy.
+///
+/// One budget is shared by every snapshot of a registry, so concurrent range,
+/// single-date, history, and search callers draw from the same limits.
+///
+/// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+pub struct ProviderBudget {
+    global: Arc<Semaphore>,
+    per_provider: Mutex<HashMap<String, Arc<Semaphore>>>,
+    max_concurrency: usize,
+    per_provider_concurrency: usize,
+    max_attempts: u32,
+    max_backoff: Duration,
+    base_backoff: Duration,
+}
+
+impl std::fmt::Debug for ProviderBudget {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderBudget")
+            .field("max_concurrency", &self.max_concurrency)
+            .field("max_attempts", &self.max_attempts)
+            .field("max_backoff", &self.max_backoff)
+            .finish()
+    }
+}
+
+impl Default for ProviderBudget {
+    fn default() -> Self {
+        Self::new(
+            DEFAULT_PROVIDER_MAX_CONCURRENCY,
+            DEFAULT_PROVIDER_MAX_ATTEMPTS,
+            DEFAULT_PROVIDER_MAX_BACKOFF,
+        )
+    }
+}
+
+impl ProviderBudget {
+    /// Builds a budget. Zero values are clamped to one so a bad config cannot
+    /// deadlock the registry.
+    ///
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn new(max_concurrency: usize, max_attempts: u32, max_backoff: Duration) -> Self {
+        let max_concurrency = max_concurrency.max(1);
+        let max_attempts = max_attempts.max(1);
+        let max_backoff = if max_backoff.is_zero() {
+            Duration::from_millis(1)
+        } else {
+            max_backoff
+        };
+        let base_backoff = (max_backoff / 4).max(Duration::from_millis(1));
+        Self {
+            global: Arc::new(Semaphore::new(max_concurrency)),
+            per_provider: Mutex::new(HashMap::new()),
+            max_concurrency,
+            per_provider_concurrency: max_concurrency,
+            max_attempts,
+            max_backoff,
+            base_backoff,
+        }
+    }
+
+    /// Overrides the per-provider concurrency independently of the global
+    /// limit.
+    ///
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn with_provider_concurrency(mut self, per_provider_concurrency: usize) -> Self {
+        self.per_provider_concurrency = per_provider_concurrency.max(1);
+        self
+    }
+
+    /// Overrides the exponential base delay. Tests use a short base.
+    ///
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn with_base_backoff(mut self, base_backoff: Duration) -> Self {
+        self.base_backoff = base_backoff.max(Duration::from_millis(1));
+        self
+    }
+
+    /// The configured global/per-provider concurrency.
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn max_concurrency(&self) -> usize {
+        self.max_concurrency
+    }
+
+    /// The configured attempt cap (including the first attempt).
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn max_attempts(&self) -> u32 {
+        self.max_attempts
+    }
+
+    /// Runs one provider call under the budget, retrying transient and
+    /// rate-limited failures within the attempt cap.
+    ///
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub async fn run<F, Fut, T>(
+        &self,
+        source_id: &str,
+        mut call: F,
+    ) -> Result<T, MarketDataProviderError>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<T, MarketDataProviderError>>,
+    {
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            let permits = self.acquire(source_id).await?;
+            let outcome = call().await;
+            drop(permits);
+            match outcome {
+                Ok(value) => return Ok(value),
+                Err(error) if error.should_fallover() && attempt < self.max_attempts => {
+                    let delay = self.retry_delay(&error, attempt);
+                    tracing::warn!(
+                        source_id,
+                        attempt,
+                        delay_ms = delay.as_millis(),
+                        error = %error,
+                        "provider call failed; retrying within budget"
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    /// The delay before the next attempt: provider `Retry-After` up to the
+    /// 60-second cap, otherwise exponential backoff up to the configured cap.
+    ///
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn retry_delay(&self, error: &MarketDataProviderError, completed_attempt: u32) -> Duration {
+        match error {
+            MarketDataProviderError::RateLimited {
+                retry_after: Some(retry_after),
+                ..
+            } => (*retry_after).min(RETRY_AFTER_CAP),
+            _ => self.backoff(completed_attempt),
+        }
+    }
+
+    /// Exponential backoff for the completed attempt number.
+    fn backoff(&self, attempt: u32) -> Duration {
+        let exponent = attempt.saturating_sub(1).min(16);
+        let factor = 1u32 << exponent;
+        self.base_backoff
+            .saturating_mul(factor)
+            .min(self.max_backoff)
+    }
+
+    /// Acquires the global permit, then this provider's permit.
+    async fn acquire(
+        &self,
+        source_id: &str,
+    ) -> Result<(OwnedSemaphorePermit, OwnedSemaphorePermit), MarketDataProviderError> {
+        let global = Arc::clone(&self.global)
+            .acquire_owned()
+            .await
+            .map_err(|_| {
+                MarketDataProviderError::Infrastructure(
+                    "provider budget global semaphore closed".into(),
+                )
+            })?;
+        let provider_semaphore = {
+            let mut providers = self
+                .per_provider
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            Arc::clone(
+                providers
+                    .entry(source_id.to_string())
+                    .or_insert_with(|| Arc::new(Semaphore::new(self.per_provider_concurrency))),
+            )
+        };
+        let provider = provider_semaphore.acquire_owned().await.map_err(|_| {
+            MarketDataProviderError::Infrastructure(format!(
+                "provider budget semaphore for '{source_id}' closed"
+            ))
+        })?;
+        Ok((global, provider))
+    }
+}
 
 /// Lightweight, serializable description of one configured source.
 ///
@@ -171,6 +379,8 @@ pub struct DataSourceRegistry {
     /// Runtime enabled state. The database is the authority when persisted;
     /// this lock holds the in-process projection.
     state: RwLock<RegistryState>,
+    /// Shared provider concurrency/retry budget.
+    budget: Arc<ProviderBudget>,
 }
 
 /// The mutable runtime projection of source enablement.
@@ -190,9 +400,16 @@ struct RegistryState {
 pub struct RegistrySnapshot {
     providers: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
     configured_ids: BTreeSet<String>,
+    budget: Arc<ProviderBudget>,
 }
 
 impl RegistrySnapshot {
+    /// The shared provider budget this snapshot draws from.
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn provider_budget(&self) -> Arc<ProviderBudget> {
+        Arc::clone(&self.budget)
+    }
+
     /// Whether the id belongs to any configured source (enabled or not).
     /// Implements FR-026 / FR-028..FR-031 of spec 022.
     pub fn is_configured(&self, source_id: &str) -> bool {
@@ -209,6 +426,16 @@ impl DataSourceRegistry {
     /// deployment default); a database-backed builder overrides it.
     pub fn new(
         providers: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+    ) -> Result<Self, MarketDataProviderError> {
+        Self::new_with_budget(providers, ProviderBudget::default())
+    }
+
+    /// Construct with an explicit provider budget.
+    ///
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn new_with_budget(
+        providers: Vec<Arc<dyn MarketDataProvider + Send + Sync>>,
+        budget: ProviderBudget,
     ) -> Result<Self, MarketDataProviderError> {
         let mut ids_seen = BTreeSet::new();
         for p in &providers {
@@ -236,6 +463,7 @@ impl DataSourceRegistry {
                 enabled,
                 enabled_ids,
             }),
+            budget: Arc::new(budget),
         })
     }
 
@@ -257,6 +485,7 @@ impl DataSourceRegistry {
         RegistrySnapshot {
             providers: self.read_state().enabled.clone(),
             configured_ids: self.all.iter().map(|p| p.source_id().to_string()).collect(),
+            budget: Arc::clone(&self.budget),
         }
     }
 
@@ -471,7 +700,13 @@ impl RegistrySnapshot {
         let mut last_retryable: Option<MarketDataProviderError> = None;
         let mut failures: Vec<SourceFailure> = Vec::new();
         for provider in &candidates {
-            match provider.get_latest_bar(request.clone()).await {
+            match self
+                .budget
+                .run(provider.source_id(), || {
+                    provider.get_latest_bar(request.clone())
+                })
+                .await
+            {
                 Ok(bar) => {
                     return WalkOutcome {
                         bar: Some(bar),
@@ -535,7 +770,13 @@ impl RegistrySnapshot {
         }
         let mut last_retryable: Option<MarketDataProviderError> = None;
         for provider in &candidates {
-            match provider.get_historical_range(request.clone()).await {
+            match self
+                .budget
+                .run(provider.source_id(), || {
+                    provider.get_historical_range(request.clone())
+                })
+                .await
+            {
                 Ok(range) => return Ok(range),
                 Err(e) if e.should_fallover() => {
                     last_retryable = Some(e);
@@ -575,7 +816,13 @@ impl RegistrySnapshot {
         let mut last_retryable: Option<MarketDataProviderError> = None;
         let mut failures: Vec<SourceFailure> = Vec::new();
         for provider in &candidates {
-            match provider.get_historical_range(request.clone()).await {
+            match self
+                .budget
+                .run(provider.source_id(), || {
+                    provider.get_historical_range(request.clone())
+                })
+                .await
+            {
                 Ok(range) => {
                     return RangeWalkOutcome {
                         range: Some(range),
@@ -652,7 +899,13 @@ impl RegistrySnapshot {
             let request = TickerLookupRequest {
                 query: query.to_string(),
             };
-            match provider.lookup_ticker(request).await {
+            match self
+                .budget
+                .run(provider.source_id(), || {
+                    provider.lookup_ticker(request.clone())
+                })
+                .await
+            {
                 Ok(result) => {
                     let matches: Vec<TickerLookupMatch> = result
                         .hits
@@ -711,7 +964,12 @@ impl RegistrySnapshot {
     ) -> BTreeMap<String, Result<LatestBar, MarketDataProviderError>> {
         let mut out = BTreeMap::new();
         for provider in &self.providers {
-            let outcome = provider.get_latest_bar(request.clone()).await;
+            let outcome = self
+                .budget
+                .run(provider.source_id(), || {
+                    provider.get_latest_bar(request.clone())
+                })
+                .await;
             out.insert(provider.source_id().to_string(), outcome);
         }
         out
@@ -725,7 +983,12 @@ impl RegistrySnapshot {
     ) -> BTreeMap<String, Result<TickerLookupResult, MarketDataProviderError>> {
         let mut out = BTreeMap::new();
         for provider in &self.providers {
-            let outcome = provider.lookup_ticker(request.clone()).await;
+            let outcome = self
+                .budget
+                .run(provider.source_id(), || {
+                    provider.lookup_ticker(request.clone())
+                })
+                .await;
             out.insert(provider.source_id().to_string(), outcome);
         }
         out
@@ -764,10 +1027,18 @@ impl RegistrySnapshot {
     ) -> Vec<SourceLookupOutcome> {
         let providers = self.search_providers(domain);
         let query = query.to_string();
+        let budget = Arc::clone(&self.budget);
         let futures = providers.iter().map(|provider| {
             let query = query.clone();
+            let budget = Arc::clone(&budget);
             async move {
-                let result = provider.lookup_ticker(TickerLookupRequest { query }).await;
+                let result = budget
+                    .run(provider.source_id(), || {
+                        provider.lookup_ticker(TickerLookupRequest {
+                            query: query.clone(),
+                        })
+                    })
+                    .await;
                 SourceLookupOutcome {
                     source_id: provider.source_id().to_string(),
                     display_name: provider.display_name().to_string(),

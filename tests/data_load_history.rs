@@ -364,7 +364,8 @@ async fn range_group_metadata_and_progress_are_durable() {
         report
             .dates
             .iter()
-            .all(|section| section.report.identifiers[0].stored.is_some())
+            .all(|summary| summary.loaded == 1 && summary.run_id.is_some()),
+        "each date persisted one row and carries its audit id"
     );
 
     let rows: Vec<(String, NaiveDate, NaiveDate, i32, Vec<String>)> = sqlx::query_as(
@@ -405,6 +406,7 @@ fn history_config(
         to,
         preferred_source: Some("yahoo_finance".to_string()),
         trigger: "chart".to_string(),
+        owner_id: "dev-user".to_string(),
     }
 }
 

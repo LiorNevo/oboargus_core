@@ -294,10 +294,15 @@ pub struct LoadRunRow {
     pub range_concurrency: Option<i32>,
     /// Distinct sources that answered, for list rendering.
     pub answering_sources: Vec<String>,
+    /// Owner of the run (`None` for legacy rows).
+    pub owner_id: Option<String>,
+    /// Terminal status (`running`, `complete`, `partial`, `failed`,
+    /// `interrupted`, `cancelled`).
+    pub terminal_status: String,
 }
 
 /// Metadata written when a load run starts.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 /// Implements FR-026 / FR-028..FR-031 of spec 022.
 pub struct LoadRunContext {
     /// Data domain loaded by the run.
@@ -312,6 +317,8 @@ pub struct LoadRunContext {
     pub range_to: Option<NaiveDate>,
     /// Window size used by the range.
     pub range_concurrency: Option<i32>,
+    /// Owner of the run. Empty for legacy/dev callers without an identity.
+    pub owner_id: String,
 }
 
 impl LoadRunContext {
@@ -325,7 +332,15 @@ impl LoadRunContext {
             range_from: None,
             range_to: None,
             range_concurrency: None,
+            owner_id: "dev-user".to_string(),
         }
+    }
+
+    /// Sets the owner recorded on the run.
+    /// Implements FR-005 / FR-013 of `specs/034-production-hardening/spec.md`.
+    pub fn with_owner(mut self, owner_id: impl Into<String>) -> Self {
+        self.owner_id = owner_id.into();
+        self
     }
 
     /// A market-data range child context.
@@ -364,6 +379,7 @@ impl LoadRunContext {
             range_from: Some(from),
             range_to: Some(to),
             range_concurrency: Some(concurrency),
+            owner_id: "dev-user".to_string(),
         }
     }
 }
@@ -375,7 +391,8 @@ const LOAD_RUN_SELECT: &str = "SELECT id, started_at, ended_at, trigger, request
      rejected, source_unavailable, rate_limited, storage_failure, \
      assets_created, assets_adopted, per_source_attempted, per_source_failed, \
      per_identifier, duration_ms, data_domain, as_of_date, range_group_id, \
-     range_from, range_to, range_concurrency, answering_sources \
+     range_from, range_to, range_concurrency, answering_sources, owner_id, \
+     terminal_status \
      FROM reference_data_load_runs WHERE id = $1";
 
 /// Opens a new load-run audit row.
@@ -417,12 +434,12 @@ pub async fn start_load_run_with_context(
             rejected, source_unavailable, rate_limited, storage_failure,
             per_source_attempted, per_source_failed, per_identifier,
             data_domain, as_of_date, range_group_id, range_from, range_to,
-            range_concurrency, answering_sources
+            range_concurrency, answering_sources, owner_id, terminal_status
          ) VALUES (
             $1, NOW(), $2, $3,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
-            $4, $5, $6, $7, $8, $9, '{}'::text[]
+            $4, $5, $6, $7, $8, $9, '{}'::text[], $10, 'running'
          )",
     )
     .bind(id)
@@ -434,6 +451,7 @@ pub async fn start_load_run_with_context(
     .bind(context.range_from)
     .bind(context.range_to)
     .bind(context.range_concurrency)
+    .bind((!context.owner_id.is_empty()).then_some(context.owner_id.as_str()))
     .execute(pool)
     .await
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("start_load_run: {e}")))?;
@@ -500,7 +518,8 @@ pub async fn finish_load_run(
              per_source_failed = $17, \
              per_identifier = $18, \
              answering_sources = $19, \
-             duration_ms = (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint \
+             duration_ms = (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint, \
+             terminal_status = $20 \
          WHERE id = $1",
     )
     .bind(run_id)
@@ -522,6 +541,7 @@ pub async fn finish_load_run(
     .bind(per_source_failed)
     .bind(per_identifier)
     .bind(&answering_sources)
+    .bind(terminal_status_for_counters(counters))
     .execute(pool)
     .await
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("finish_load_run: {e}")))?;
@@ -555,6 +575,199 @@ pub async fn get_load_run(
             "load run '{run_id}' does not exist"
         ))),
     }
+}
+
+/// Derives a child run's terminal status from its counters.
+///
+/// Implements FR-017 of `specs/034-production-hardening/spec.md`.
+pub fn terminal_status_for_counters(
+    counters: &crate::market_data::load::DataSourceLoadCounters,
+) -> &'static str {
+    let failed = counters.total_failed();
+    if failed == 0 {
+        "complete"
+    } else if failed == counters.total_attempted() {
+        "failed"
+    } else {
+        "partial"
+    }
+}
+
+/// Closes an open child run as `failed` when the run ended on an error.
+///
+/// Implements FR-019 of `specs/034-production-hardening/spec.md`.
+pub async fn fail_load_run(
+    pool: &sqlx::PgPool,
+    run_id: Uuid,
+    terminal_status: &str,
+) -> Result<(), MarketDataProviderError> {
+    sqlx::query(
+        "UPDATE reference_data_load_runs
+         SET ended_at = COALESCE(ended_at, NOW()),
+             terminal_status = $2,
+             duration_ms = COALESCE(
+                 duration_ms,
+                 (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint
+             )
+         WHERE id = $1",
+    )
+    .bind(run_id)
+    .bind(terminal_status)
+    .execute(pool)
+    .await
+    .map_err(|e| MarketDataProviderError::Infrastructure(format!("fail_load_run: {e}")))?;
+    Ok(())
+}
+
+/// One row in `load_range_groups`.
+///
+/// Implements FR-015 / FR-016 of `specs/034-production-hardening/spec.md`.
+#[derive(Debug, Clone, PartialEq, Eq, FromRow, Serialize, Deserialize)]
+pub struct LoadRangeGroupRow {
+    /// Group id returned to the client.
+    pub id: Uuid,
+    /// Owner the group belongs to.
+    pub owner_id: String,
+    /// Client idempotency key.
+    pub client_group_id: Uuid,
+    /// Inclusive first date.
+    pub from_date: NaiveDate,
+    /// Inclusive last date.
+    pub to_date: NaiveDate,
+    /// Window size.
+    pub concurrency: i32,
+    /// `running`, `complete`, `partial`, `failed`, `cancelled`, `interrupted`.
+    pub status: String,
+    /// Original inclusive day count (never rewritten).
+    pub dates_requested: i32,
+    /// Set before `stopped:true` is returned.
+    pub cancel_requested_at: Option<DateTime<Utc>>,
+    /// When the group started.
+    pub started_at: DateTime<Utc>,
+    /// When the group became terminal.
+    pub ended_at: Option<DateTime<Utc>>,
+    /// Row creation time.
+    pub created_at: DateTime<Utc>,
+}
+
+const GROUP_SELECT: &str = "SELECT id, owner_id, client_group_id, from_date, \
+    to_date, concurrency, status, dates_requested, cancel_requested_at, \
+    started_at, ended_at, created_at FROM load_range_groups";
+
+/// The outcome of registering a range group.
+///
+/// Implements FR-015 of `specs/034-production-hardening/spec.md`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupRegistration {
+    /// A new group row was committed.
+    Inserted(LoadRangeGroupRow),
+    /// The `(owner_id, client_group_id)` key already exists.
+    Conflict(Uuid),
+}
+
+/// Atomically registers a range group.
+///
+/// Implements FR-015 of `specs/034-production-hardening/spec.md`.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_load_range_group(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    client_group_id: Uuid,
+    from_date: NaiveDate,
+    to_date: NaiveDate,
+    concurrency: i32,
+    dates_requested: i32,
+) -> Result<GroupRegistration, MarketDataProviderError> {
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO load_range_groups (
+            owner_id, client_group_id, from_date, to_date, concurrency,
+            status, dates_requested
+         ) VALUES ($1, $2, $3, $4, $5, 'running', $6)
+         ON CONFLICT (owner_id, client_group_id) DO NOTHING
+         RETURNING id",
+    )
+    .bind(owner_id)
+    .bind(client_group_id)
+    .bind(from_date)
+    .bind(to_date)
+    .bind(concurrency)
+    .bind(dates_requested)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        MarketDataProviderError::Infrastructure(format!("insert_load_range_group: {e}"))
+    })?;
+
+    let group_id = match inserted {
+        Some(id) => id,
+        None => {
+            let existing: Option<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM load_range_groups \
+                 WHERE owner_id = $1 AND client_group_id = $2",
+            )
+            .bind(owner_id)
+            .bind(client_group_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| {
+                MarketDataProviderError::Infrastructure(format!("group conflict read: {e}"))
+            })?;
+            return match existing {
+                Some(id) => Ok(GroupRegistration::Conflict(id)),
+                None => Err(MarketDataProviderError::Infrastructure(
+                    "group insert conflicted but no existing group was found".into(),
+                )),
+            };
+        }
+    };
+
+    let row = get_load_range_group(pool, group_id).await?;
+    Ok(GroupRegistration::Inserted(row))
+}
+
+/// Reads one range group by id.
+///
+/// Implements FR-015 of `specs/034-production-hardening/spec.md`.
+pub async fn get_load_range_group(
+    pool: &sqlx::PgPool,
+    group_id: Uuid,
+) -> Result<LoadRangeGroupRow, MarketDataProviderError> {
+    let sql = format!("{GROUP_SELECT} WHERE id = $1");
+    let row: Option<LoadRangeGroupRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(group_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            MarketDataProviderError::Infrastructure(format!("get_load_range_group: {e}"))
+        })?;
+    row.ok_or_else(|| {
+        MarketDataProviderError::NotFound(format!("range group '{group_id}' does not exist"))
+    })
+}
+
+/// Closes every child run that is still open as `interrupted`.
+///
+/// Startup recovery only updates audit columns; it never creates, deletes,
+/// or duplicates observations. Call this **after**
+/// [`crate::market_data::history::finalize_open_groups`], so a group is not
+/// credited with a date that was still open before recovery.
+/// Returns the number of rows closed.
+///
+/// Implements FR-019 of `specs/034-production-hardening/spec.md`.
+pub async fn finalize_open_child_runs(pool: &sqlx::PgPool) -> Result<u64, MarketDataProviderError> {
+    let result = sqlx::query(
+        "UPDATE reference_data_load_runs
+         SET ended_at = NOW(),
+             terminal_status = 'interrupted',
+             duration_ms = (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint
+         WHERE ended_at IS NULL",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        MarketDataProviderError::Infrastructure(format!("finalize_open_child_runs: {e}"))
+    })?;
+    Ok(result.rows_affected())
 }
 
 /// The payload of a reconciliation audit row.

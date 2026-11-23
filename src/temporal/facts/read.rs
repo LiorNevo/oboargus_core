@@ -4,6 +4,8 @@
 //! Market prices resolve from `market_observations` directly. Every read uses
 //! the shared latest-`known_at` rule; retracted winners become "no value".
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use sqlx::{AssertSqlSafe, FromRow, PgPool};
 use uuid::Uuid;
@@ -144,10 +146,7 @@ pub async fn fact_history(
     .fetch_all(pool)
     .await?;
 
-    let mut points = Vec::with_capacity(rows.len());
-    for row in rows {
-        points.push(row_to_point(pool, row).await?);
-    }
+    let points = rows_to_points(pool, rows, def.storage_kind).await?;
     Ok(points)
 }
 
@@ -219,10 +218,7 @@ pub async fn fact_series_page(
 
     let has_more = i64::try_from(rows.len()).unwrap_or(i64::MAX) > bounded;
     let rows: Vec<FactRow> = rows.into_iter().take(bounded as usize).collect();
-    let mut points = Vec::with_capacity(rows.len());
-    for row in rows {
-        points.push(row_to_point(pool, row).await?);
-    }
+    let points = rows_to_points(pool, rows, def.storage_kind).await?;
     Ok(FactSeriesPage { points, has_more })
 }
 
@@ -308,16 +304,11 @@ async fn resolve_one(
     }
 }
 
-async fn row_to_point(pool: &PgPool, row: FactRow) -> Result<FactPoint, TemporalError> {
+fn point_from_row(row: FactRow, value: Option<FactValue>) -> Result<FactPoint, TemporalError> {
     let def = catalog_fact_type(&row.fact_type).ok_or_else(|| TemporalError::UnknownFactType {
         fact_type: row.fact_type.clone(),
     })?;
     let subject = FactSubject::from_parts(&row.subject_kind, row.subject_id)?;
-    let value = if row.retracted {
-        None
-    } else {
-        Some(load_value(pool, row.id, def.storage_kind).await?)
-    };
 
     Ok(FactPoint {
         id: row.id,
@@ -332,6 +323,143 @@ async fn row_to_point(pool: &PgPool, row: FactRow) -> Result<FactPoint, Temporal
         retraction_reason: row.retraction_reason,
         content_hash: row.content_hash,
     })
+}
+
+/// Build points for a batch of rows with one payload query per storage kind.
+///
+/// A scalar series issues: one subject check, one envelope query, and one
+/// payload query — independent of the number of points.
+async fn rows_to_points(
+    pool: &PgPool,
+    rows: Vec<FactRow>,
+    storage: StorageKind,
+) -> Result<Vec<FactPoint>, TemporalError> {
+    let ids: Vec<Uuid> = rows
+        .iter()
+        .filter(|row| !row.retracted)
+        .map(|row| row.id)
+        .collect();
+    let mut values = load_values(pool, &ids, storage).await?;
+
+    rows.into_iter()
+        .map(|row| {
+            let value = if row.retracted {
+                None
+            } else {
+                Some(
+                    values
+                        .remove(&row.id)
+                        .ok_or(TemporalError::MissingPayload { fact_id: row.id })?,
+                )
+            };
+            point_from_row(row, value)
+        })
+        .collect()
+}
+
+/// Load every payload for `ids` in one statement.
+async fn load_values(
+    pool: &PgPool,
+    ids: &[Uuid],
+    storage: StorageKind,
+) -> Result<HashMap<Uuid, FactValue>, TemporalError> {
+    let mut values = HashMap::with_capacity(ids.len());
+    if ids.is_empty() {
+        return Ok(values);
+    }
+    match storage {
+        StorageKind::Text => {
+            let rows: Vec<(Uuid, String)> = sqlx::query_as(
+                "SELECT fact_id, value FROM fact_text_values WHERE fact_id = ANY($1)",
+            )
+            .bind(ids)
+            .fetch_all(pool)
+            .await?;
+            values.extend(
+                rows.into_iter()
+                    .map(|(id, value)| (id, FactValue::Text { value })),
+            );
+        }
+        StorageKind::Decimal => {
+            let rows: Vec<(Uuid, rust_decimal::Decimal)> = sqlx::query_as(
+                "SELECT fact_id, value FROM fact_decimal_values WHERE fact_id = ANY($1)",
+            )
+            .bind(ids)
+            .fetch_all(pool)
+            .await?;
+            values.extend(
+                rows.into_iter()
+                    .map(|(id, value)| (id, FactValue::Decimal { value })),
+            );
+        }
+        StorageKind::Integer => {
+            let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+                "SELECT fact_id, value FROM fact_integer_values WHERE fact_id = ANY($1)",
+            )
+            .bind(ids)
+            .fetch_all(pool)
+            .await?;
+            values.extend(
+                rows.into_iter()
+                    .map(|(id, value)| (id, FactValue::Integer { value })),
+            );
+        }
+        StorageKind::Boolean => {
+            let rows: Vec<(Uuid, bool)> = sqlx::query_as(
+                "SELECT fact_id, value FROM fact_boolean_values WHERE fact_id = ANY($1)",
+            )
+            .bind(ids)
+            .fetch_all(pool)
+            .await?;
+            values.extend(
+                rows.into_iter()
+                    .map(|(id, value)| (id, FactValue::Boolean { value })),
+            );
+        }
+        StorageKind::Date => {
+            let rows: Vec<(Uuid, chrono::NaiveDate)> = sqlx::query_as(
+                "SELECT fact_id, value FROM fact_date_values WHERE fact_id = ANY($1)",
+            )
+            .bind(ids)
+            .fetch_all(pool)
+            .await?;
+            values.extend(
+                rows.into_iter()
+                    .map(|(id, value)| (id, FactValue::Date { value })),
+            );
+        }
+        StorageKind::Timestamp => {
+            let rows: Vec<(Uuid, DateTime<Utc>)> = sqlx::query_as(
+                "SELECT fact_id, value FROM fact_timestamp_values WHERE fact_id = ANY($1)",
+            )
+            .bind(ids)
+            .fetch_all(pool)
+            .await?;
+            values.extend(
+                rows.into_iter()
+                    .map(|(id, value)| (id, FactValue::Timestamp { value })),
+            );
+        }
+        StorageKind::MarketObservation => {
+            return Err(TemporalError::InvalidFactValue {
+                fact_type: "market_price".to_string(),
+                detail: "market observations are not stored in temporal_facts".to_string(),
+            });
+        }
+    }
+    Ok(values)
+}
+
+async fn row_to_point(pool: &PgPool, row: FactRow) -> Result<FactPoint, TemporalError> {
+    let def = catalog_fact_type(&row.fact_type).ok_or_else(|| TemporalError::UnknownFactType {
+        fact_type: row.fact_type.clone(),
+    })?;
+    let value = if row.retracted {
+        None
+    } else {
+        Some(load_value(pool, row.id, def.storage_kind).await?)
+    };
+    point_from_row(row, value)
 }
 
 async fn load_value(

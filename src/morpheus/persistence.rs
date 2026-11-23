@@ -99,6 +99,19 @@ pub async fn get_conversation(
     .ok_or_else(|| not_found("conversation"))
 }
 
+/// Returns the owner recorded on a conversation.
+pub async fn conversation_owner(
+    pool: &PgPool,
+    conversation_id: Uuid,
+) -> Result<String, MorpheusError> {
+    sqlx::query_scalar("SELECT owner_id FROM morpheus_conversations WHERE id = $1")
+        .bind(conversation_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(db)?
+        .ok_or_else(|| not_found("conversation"))
+}
+
 /// Lists non-empty conversations, newest activity first.
 pub async fn list_conversations(
     pool: &PgPool,

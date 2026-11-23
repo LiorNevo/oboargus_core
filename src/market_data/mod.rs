@@ -47,12 +47,14 @@ pub use load::{
     run_identifier_load,
 };
 pub use load_range::{
-    DateLoadSection, IdentifierRangeLoadConfig, IdentifierRangeLoadReport, MAX_CONCURRENCY,
+    DateLoadSummary, IdentifierRangeLoadConfig, IdentifierRangeLoadReport, MAX_CONCURRENCY,
     RangeLoadTotals, run_identifier_range_load,
 };
 pub use reconcile::{ReconcileConfig, ReconcileSummary, ReconciliationPolicy, run_reconcile};
 pub use refresh::{RefreshConfig, RefreshSummary, run_refresh};
-pub use registry::{DataSourceRegistry, RegistrySnapshot, SourceCatalogEntry, SourceDescriptor};
+pub use registry::{
+    DataSourceRegistry, ProviderBudget, RegistrySnapshot, SourceCatalogEntry, SourceDescriptor,
+};
 pub use source_state::{SourceStateChange, SourceStateChangeResult, set_source_enabled};
 pub use trait_::MarketDataProvider;
 pub use types::{

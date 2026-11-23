@@ -507,11 +507,48 @@ pub async fn observation_at(
     Ok(row.filter(|row| !row.retracted))
 }
 
+/// Creates one monthly partition if it does not already exist.
+///
+/// The creation runs in its own transaction under a transaction-scoped
+/// advisory lock keyed by `(year, month)`, so concurrent callers (startup,
+/// maintenance, and load paths) serialize instead of racing on the
+/// partition's catalog entries. The call is idempotent.
+pub async fn ensure_month_partition(
+    pool: &PgPool,
+    year: i32,
+    month: u32,
+) -> Result<(), TemporalError> {
+    let start = NaiveDate::from_ymd_opt(year, month, 1)
+        .ok_or_else(|| TemporalError::invalid_time("invalid partition month"))?;
+    let next = add_month(start)?;
+    let name = format!("market_observations_{}_{:02}", start.year(), start.month());
+    // Only integers and derived dates are interpolated; identifiers cannot
+    // be bound as statement parameters.
+    let sql = format!(
+        "CREATE TABLE IF NOT EXISTS {name} PARTITION OF market_observations \
+         FOR VALUES FROM ('{}') TO ('{}')",
+        start.format("%Y-%m-%d"),
+        next.format("%Y-%m-%d")
+    );
+    let month_key = i32::try_from(month)
+        .map_err(|_| TemporalError::invalid_time("partition month out of range"))?;
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(start.year())
+        .bind(month_key)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(AssertSqlSafe(sql)).execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Creates the monthly partitions covering `from` through `to` (inclusive).
 ///
-/// Idempotent. The default partition protects against a gap if this helper is
-/// not called before a write.
-pub async fn ensure_market_observation_partitions(
+/// Idempotent and safe under concurrent callers. The default partition
+/// protects against a gap if this helper is not called before a write.
+pub async fn ensure_month_partitions(
     pool: &PgPool,
     from: NaiveDate,
     to: NaiveDate,
@@ -525,22 +562,21 @@ pub async fn ensure_market_observation_partitions(
         .ok_or_else(|| TemporalError::invalid_time("invalid partition end"))?;
 
     while cursor <= end {
-        let next = add_month(cursor)?;
-        let name = format!(
-            "market_observations_{}_{:02}",
-            cursor.year(),
-            cursor.month()
-        );
-        let sql = format!(
-            "CREATE TABLE IF NOT EXISTS {name} PARTITION OF market_observations \
-             FOR VALUES FROM ('{}') TO ('{}')",
-            cursor.format("%Y-%m-%d"),
-            next.format("%Y-%m-%d")
-        );
-        sqlx::query(AssertSqlSafe(sql)).execute(pool).await?;
-        cursor = next;
+        ensure_month_partition(pool, cursor.year(), cursor.month()).await?;
+        cursor = add_month(cursor)?;
     }
     Ok(())
+}
+
+/// Creates the monthly partitions covering `from` through `to` (inclusive).
+///
+/// Backwards-compatible wrapper around [`ensure_month_partitions`].
+pub async fn ensure_market_observation_partitions(
+    pool: &PgPool,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<(), TemporalError> {
+    ensure_month_partitions(pool, from, to).await
 }
 
 fn add_month(date: NaiveDate) -> Result<NaiveDate, TemporalError> {

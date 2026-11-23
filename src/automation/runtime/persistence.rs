@@ -91,22 +91,32 @@ async fn fetch_flow(
     .ok_or_else(|| AutomationError::NotFound(format!("flow {flow_id}")))
 }
 
-/// Loads a flow and its current draft, if any.
-pub async fn get_flow(
+async fn load_flow(
     pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
     flow_id: Uuid,
-) -> Result<(FlowRecord, Option<FlowVersionRecord>), AutomationError> {
-    let flow = sqlx::query_as::<_, FlowRecord>(
+) -> Result<FlowRecord, AutomationError> {
+    sqlx::query_as::<_, FlowRecord>(
         "SELECT id, owner_id, name, description, tags, status, current_draft_id, \
                 current_published_version_id, draft_revision, created_at, updated_at, deleted_at \
-         FROM automation_flows WHERE id = $1 AND deleted_at IS NULL",
+         FROM automation_flows \
+         WHERE id = $1 AND deleted_at IS NULL \
+           AND ($2::text IS NULL OR owner_id = $2)",
     )
     .bind(flow_id)
+    .bind(owner_id)
     .fetch_optional(pool)
     .await
     .map_err(db_error)?
-    .ok_or_else(|| AutomationError::NotFound(format!("flow {flow_id}")))?;
+    .ok_or_else(|| AutomationError::NotFound(format!("flow {flow_id}")))
+}
 
+async fn flow_with_draft(
+    pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
+    flow_id: Uuid,
+) -> Result<(FlowRecord, Option<FlowVersionRecord>), AutomationError> {
+    let flow = load_flow(pool, owner_id, flow_id).await?;
     let draft = match flow.current_draft_id {
         Some(draft_id) => get_version_by_id(pool, draft_id).await?,
         None => None,
@@ -114,9 +124,41 @@ pub async fn get_flow(
     Ok((flow, draft))
 }
 
-/// Lists live flows, newest first.
-pub async fn list_flows(
+/// Loads a flow and its current draft, if any.
+pub async fn get_flow(
     pool: &sqlx::PgPool,
+    flow_id: Uuid,
+) -> Result<(FlowRecord, Option<FlowVersionRecord>), AutomationError> {
+    flow_with_draft(pool, None, flow_id).await
+}
+
+/// Loads a flow owned by `owner_id` and its current draft.
+///
+/// A flow owned by somebody else is reported as not found.
+pub async fn get_owned_flow(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    flow_id: Uuid,
+) -> Result<(FlowRecord, Option<FlowVersionRecord>), AutomationError> {
+    flow_with_draft(pool, Some(owner_id), flow_id).await
+}
+
+/// Returns the owner of a live flow.
+pub async fn flow_owner_id(
+    pool: &sqlx::PgPool,
+    flow_id: Uuid,
+) -> Result<Option<String>, AutomationError> {
+    sqlx::query_scalar("SELECT owner_id FROM automation_flows WHERE id = $1 AND deleted_at IS NULL")
+        .bind(flow_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(db_error)
+}
+
+/// Lists live flows, newest first, optionally scoped to one owner.
+pub async fn list_flows_scoped(
+    pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
     status: Option<&str>,
     search: Option<&str>,
     limit: i64,
@@ -127,10 +169,12 @@ pub async fn list_flows(
                 current_published_version_id, draft_revision, created_at, updated_at, deleted_at \
          FROM automation_flows \
          WHERE deleted_at IS NULL \
-           AND ($1::text IS NULL OR status = $1) \
-           AND ($2::text IS NULL OR name ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%') \
-         ORDER BY updated_at DESC LIMIT $3 OFFSET $4",
+           AND ($1::text IS NULL OR owner_id = $1) \
+           AND ($2::text IS NULL OR status = $2) \
+           AND ($3::text IS NULL OR name ILIKE '%' || $3 || '%' OR description ILIKE '%' || $3 || '%') \
+         ORDER BY updated_at DESC LIMIT $4 OFFSET $5",
     )
+    .bind(owner_id)
     .bind(status)
     .bind(search)
     .bind(limit)
@@ -138,6 +182,29 @@ pub async fn list_flows(
     .fetch_all(pool)
     .await
     .map_err(db_error)
+}
+
+/// Lists live flows, newest first.
+pub async fn list_flows(
+    pool: &sqlx::PgPool,
+    status: Option<&str>,
+    search: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<FlowRecord>, AutomationError> {
+    list_flows_scoped(pool, None, status, search, limit, offset).await
+}
+
+/// Lists live flows owned by `owner_id`, newest first.
+pub async fn list_flows_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    status: Option<&str>,
+    search: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<FlowRecord>, AutomationError> {
+    list_flows_scoped(pool, Some(owner_id), status, search, limit, offset).await
 }
 
 /// Updates mutable flow metadata.
@@ -491,14 +558,76 @@ pub async fn insert_run(
     idempotency_key: Option<&str>,
     parent_run_id: Option<Uuid>,
 ) -> Result<RunRecord, AutomationError> {
+    insert_run_scoped(
+        pool,
+        None,
+        flow_id,
+        flow_version_id,
+        trigger_id,
+        trigger_kind,
+        trigger_node_id,
+        actor_id,
+        inputs,
+        idempotency_key,
+        parent_run_id,
+    )
+    .await
+}
+
+/// Inserts a queued run owned by `owner_id` and returns the stored row.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_run_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    flow_id: Uuid,
+    flow_version_id: Uuid,
+    trigger_id: Option<Uuid>,
+    trigger_kind: &str,
+    trigger_node_id: Option<&str>,
+    actor_id: Option<&str>,
+    inputs: &Value,
+    idempotency_key: Option<&str>,
+    parent_run_id: Option<Uuid>,
+) -> Result<RunRecord, AutomationError> {
+    insert_run_scoped(
+        pool,
+        Some(owner_id),
+        flow_id,
+        flow_version_id,
+        trigger_id,
+        trigger_kind,
+        trigger_node_id,
+        actor_id,
+        inputs,
+        idempotency_key,
+        parent_run_id,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_run_scoped(
+    pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
+    flow_id: Uuid,
+    flow_version_id: Uuid,
+    trigger_id: Option<Uuid>,
+    trigger_kind: &str,
+    trigger_node_id: Option<&str>,
+    actor_id: Option<&str>,
+    inputs: &Value,
+    idempotency_key: Option<&str>,
+    parent_run_id: Option<Uuid>,
+) -> Result<RunRecord, AutomationError> {
     let run_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO automation_runs \
-         (id, flow_id, flow_version_id, trigger_id, trigger_kind, trigger_node_id, actor_id, \
-          status, inputs, idempotency_key, parent_run_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10)",
+         (id, owner_id, flow_id, flow_version_id, trigger_id, trigger_kind, trigger_node_id, \
+          actor_id, status, inputs, idempotency_key, parent_run_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11)",
     )
     .bind(run_id)
+    .bind(owner_id)
     .bind(flow_id)
     .bind(flow_version_id)
     .bind(trigger_id)
@@ -521,14 +650,35 @@ pub async fn insert_run(
 
 /// Loads a run by id.
 pub async fn get_run(pool: &sqlx::PgPool, run_id: Uuid) -> Result<RunRecord, AutomationError> {
+    get_run_scoped(pool, None, run_id).await
+}
+
+/// Loads a run owned by `owner_id`.
+///
+/// A run owned by somebody else is reported as not found.
+pub async fn get_owned_run(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    run_id: Uuid,
+) -> Result<RunRecord, AutomationError> {
+    get_run_scoped(pool, Some(owner_id), run_id).await
+}
+
+async fn get_run_scoped(
+    pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
+    run_id: Uuid,
+) -> Result<RunRecord, AutomationError> {
     sqlx::query_as::<_, RunRecord>(
         "SELECT id, flow_id, flow_version_id, trigger_id, trigger_kind, trigger_node_id, \
                 actor_id, status, inputs, outputs, summary, error, idempotency_key, \
                 parent_run_id, cancel_requested_at, queued_at, started_at, ended_at, \
                 heartbeat_at, message_count, created_at \
-         FROM automation_runs WHERE id = $1",
+         FROM automation_runs \
+         WHERE id = $1 AND ($2::text IS NULL OR owner_id = $2)",
     )
     .bind(run_id)
+    .bind(owner_id)
     .fetch_optional(pool)
     .await
     .map_err(db_error)?
@@ -545,17 +695,55 @@ pub async fn list_runs(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<RunRecord>, AutomationError> {
+    list_runs_scoped(pool, None, flow_id, status, trigger_kind, limit, offset).await
+}
+
+/// Lists runs owned by `owner_id` with optional filters.
+#[allow(clippy::too_many_arguments)]
+pub async fn list_runs_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    flow_id: Option<Uuid>,
+    status: Option<&str>,
+    trigger_kind: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<RunRecord>, AutomationError> {
+    list_runs_scoped(
+        pool,
+        Some(owner_id),
+        flow_id,
+        status,
+        trigger_kind,
+        limit,
+        offset,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn list_runs_scoped(
+    pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
+    flow_id: Option<Uuid>,
+    status: Option<&str>,
+    trigger_kind: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<RunRecord>, AutomationError> {
     sqlx::query_as::<_, RunRecord>(
         "SELECT id, flow_id, flow_version_id, trigger_id, trigger_kind, trigger_node_id, \
                 actor_id, status, inputs, outputs, summary, error, idempotency_key, \
                 parent_run_id, cancel_requested_at, queued_at, started_at, ended_at, \
                 heartbeat_at, message_count, created_at \
          FROM automation_runs \
-         WHERE ($1::uuid IS NULL OR flow_id = $1) \
-           AND ($2::text IS NULL OR status = $2) \
-           AND ($3::text IS NULL OR trigger_kind = $3) \
-         ORDER BY created_at DESC LIMIT $4 OFFSET $5",
+         WHERE ($1::text IS NULL OR owner_id = $1) \
+           AND ($2::uuid IS NULL OR flow_id = $2) \
+           AND ($3::text IS NULL OR status = $3) \
+           AND ($4::text IS NULL OR trigger_kind = $4) \
+         ORDER BY created_at DESC LIMIT $5 OFFSET $6",
     )
+    .bind(owner_id)
     .bind(flow_id)
     .bind(status)
     .bind(trigger_kind)
@@ -654,7 +842,26 @@ pub async fn request_cancel(
     pool: &sqlx::PgPool,
     run_id: Uuid,
 ) -> Result<RunRecord, AutomationError> {
-    let run = get_run(pool, run_id).await?;
+    request_cancel_scoped(pool, None, run_id).await
+}
+
+/// Requests cancellation of a non-terminal run owned by `owner_id`.
+///
+/// A run owned by somebody else is reported as not found.
+pub async fn request_cancel_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    run_id: Uuid,
+) -> Result<RunRecord, AutomationError> {
+    request_cancel_scoped(pool, Some(owner_id), run_id).await
+}
+
+async fn request_cancel_scoped(
+    pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
+    run_id: Uuid,
+) -> Result<RunRecord, AutomationError> {
+    let run = get_run_scoped(pool, owner_id, run_id).await?;
     if matches!(
         run.status.as_str(),
         "succeeded" | "partial" | "failed" | "cancelled" | "interrupted"
@@ -665,9 +872,10 @@ pub async fn request_cancel(
     }
     sqlx::query(
         "UPDATE automation_runs SET cancel_requested_at = COALESCE(cancel_requested_at, NOW()) \
-         WHERE id = $1",
+         WHERE id = $1 AND ($2::text IS NULL OR owner_id = $2)",
     )
     .bind(run_id)
+    .bind(owner_id)
     .execute(pool)
     .await
     .map_err(db_error)?;
@@ -901,24 +1109,29 @@ pub async fn list_logs(
     .map_err(db_error)
 }
 
-/// Loads flow and global context for a flow.
+/// Loads flow and global context for a flow owned by `owner_id`.
 pub async fn get_context(
     pool: &sqlx::PgPool,
+    owner_id: &str,
     flow_scope_id: &str,
     global_scope_id: &str,
 ) -> Result<(Vec<ContextRecord>, Vec<ContextRecord>), AutomationError> {
     let flow = sqlx::query_as::<_, ContextRecord>(
         "SELECT scope, scope_id, key, value, updated_at, updated_by_run_id \
-         FROM automation_context WHERE scope = 'flow' AND scope_id = $1 ORDER BY key",
+         FROM automation_context \
+         WHERE owner_id = $1 AND scope = 'flow' AND scope_id = $2 ORDER BY key",
     )
+    .bind(owner_id)
     .bind(flow_scope_id)
     .fetch_all(pool)
     .await
     .map_err(db_error)?;
     let global = sqlx::query_as::<_, ContextRecord>(
         "SELECT scope, scope_id, key, value, updated_at, updated_by_run_id \
-         FROM automation_context WHERE scope = 'global' AND scope_id = $1 ORDER BY key",
+         FROM automation_context \
+         WHERE owner_id = $1 AND scope = 'global' AND scope_id = $2 ORDER BY key",
     )
+    .bind(owner_id)
     .bind(global_scope_id)
     .fetch_all(pool)
     .await
@@ -926,26 +1139,30 @@ pub async fn get_context(
     Ok((flow, global))
 }
 
-/// Loads flow context for a flow and every subflow instance scope.
+/// Loads flow context for an owned flow and every subflow instance scope.
 pub async fn get_scoped_flow_context(
     pool: &sqlx::PgPool,
+    owner_id: &str,
     flow_id: &str,
 ) -> Result<Vec<ContextRecord>, AutomationError> {
     sqlx::query_as::<_, ContextRecord>(
         "SELECT scope, scope_id, key, value, updated_at, updated_by_run_id \
          FROM automation_context \
-         WHERE scope = 'flow' AND (scope_id = $1 OR scope_id LIKE $1 || ':%') \
+         WHERE owner_id = $1 AND scope = 'flow' \
+           AND (scope_id = $2 OR scope_id LIKE $2 || ':%') \
          ORDER BY scope_id, key",
     )
+    .bind(owner_id)
     .bind(flow_id)
     .fetch_all(pool)
     .await
     .map_err(db_error)
 }
 
-/// Writes one context key atomically.
+/// Writes one context key atomically for `owner_id`.
 pub async fn set_context(
     pool: &sqlx::PgPool,
+    owner_id: &str,
     scope: &str,
     scope_id: &str,
     key: &str,
@@ -953,12 +1170,14 @@ pub async fn set_context(
     run_id: Option<Uuid>,
 ) -> Result<(), AutomationError> {
     sqlx::query(
-        "INSERT INTO automation_context (scope, scope_id, key, value, updated_at, updated_by_run_id) \
-         VALUES ($1, $2, $3, $4, NOW(), $5) \
-         ON CONFLICT (scope, scope_id, key) DO UPDATE \
+        "INSERT INTO automation_context \
+         (owner_id, scope, scope_id, key, value, updated_at, updated_by_run_id) \
+         VALUES ($1, $2, $3, $4, $5, NOW(), $6) \
+         ON CONFLICT (owner_id, scope, scope_id, key) DO UPDATE \
          SET value = EXCLUDED.value, updated_at = NOW(), \
              updated_by_run_id = EXCLUDED.updated_by_run_id",
     )
+    .bind(owner_id)
     .bind(scope)
     .bind(scope_id)
     .bind(key)
@@ -970,19 +1189,41 @@ pub async fn set_context(
     Ok(())
 }
 
-/// Deletes durable flow context.
+/// Writes one context key for the owner of `run_id`.
+pub async fn set_context_for_run(
+    pool: &sqlx::PgPool,
+    run_id: Uuid,
+    scope: &str,
+    scope_id: &str,
+    key: &str,
+    value: &Value,
+) -> Result<(), AutomationError> {
+    let owner: Option<String> =
+        sqlx::query_scalar("SELECT owner_id FROM automation_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(db_error)?;
+    let owner = owner.ok_or_else(|| AutomationError::NotFound(format!("run {run_id}")))?;
+    set_context(pool, &owner, scope, scope_id, key, value, Some(run_id)).await
+}
+
+/// Deletes durable flow context for `owner_id`.
 pub async fn delete_context(
     pool: &sqlx::PgPool,
+    owner_id: &str,
     scope: &str,
     scope_id: &str,
 ) -> Result<(), AutomationError> {
     let statement = if scope == "flow" {
         "DELETE FROM automation_context \
-         WHERE scope = $1 AND (scope_id = $2 OR scope_id LIKE $2 || ':%')"
+         WHERE owner_id = $1 AND scope = $2 AND (scope_id = $3 OR scope_id LIKE $3 || ':%')"
     } else {
-        "DELETE FROM automation_context WHERE scope = $1 AND scope_id = $2"
+        "DELETE FROM automation_context \
+         WHERE owner_id = $1 AND scope = $2 AND scope_id = $3"
     };
     sqlx::query(statement)
+        .bind(owner_id)
         .bind(scope)
         .bind(scope_id)
         .execute(pool)
@@ -1141,6 +1382,31 @@ pub async fn get_trigger(
          FROM automation_triggers WHERE id = $1",
     )
     .bind(trigger_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| AutomationError::NotFound(format!("trigger {trigger_id}")))
+}
+
+/// Loads one trigger belonging to an owner's live flow.
+///
+/// A trigger owned by somebody else is reported as not found.
+pub async fn get_owned_trigger(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    trigger_id: Uuid,
+) -> Result<TriggerRecord, AutomationError> {
+    sqlx::query_as::<_, TriggerRecord>(
+        "SELECT t.id, t.flow_id, t.flow_version_id, t.node_id, t.kind, t.enabled, \
+                t.repeat_kind, t.interval_seconds, t.cron_expression, t.timezone, \
+                t.overlap_policy, t.missed_policy, t.next_occurrence_at, \
+                t.last_occurrence_at, t.created_by, t.created_at, t.updated_at \
+         FROM automation_triggers t \
+         JOIN automation_flows f ON f.id = t.flow_id \
+         WHERE t.id = $1 AND f.owner_id = $2 AND f.deleted_at IS NULL",
+    )
+    .bind(trigger_id)
+    .bind(owner_id)
     .fetch_optional(pool)
     .await
     .map_err(db_error)?
@@ -1406,12 +1672,35 @@ pub async fn count_runs(
     status: Option<&str>,
     trigger_kind: Option<&str>,
 ) -> Result<i64, AutomationError> {
+    count_runs_scoped(pool, None, flow_id, status, trigger_kind).await
+}
+
+/// Counts runs owned by `owner_id` for paginated responses.
+pub async fn count_runs_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    flow_id: Option<Uuid>,
+    status: Option<&str>,
+    trigger_kind: Option<&str>,
+) -> Result<i64, AutomationError> {
+    count_runs_scoped(pool, Some(owner_id), flow_id, status, trigger_kind).await
+}
+
+async fn count_runs_scoped(
+    pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
+    flow_id: Option<Uuid>,
+    status: Option<&str>,
+    trigger_kind: Option<&str>,
+) -> Result<i64, AutomationError> {
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM automation_runs \
-         WHERE ($1::uuid IS NULL OR flow_id = $1) \
-           AND ($2::text IS NULL OR status = $2) \
-           AND ($3::text IS NULL OR trigger_kind = $3)",
+         WHERE ($1::text IS NULL OR owner_id = $1) \
+           AND ($2::uuid IS NULL OR flow_id = $2) \
+           AND ($3::text IS NULL OR status = $3) \
+           AND ($4::text IS NULL OR trigger_kind = $4)",
     )
+    .bind(owner_id)
     .bind(flow_id)
     .bind(status)
     .bind(trigger_kind)
@@ -1426,12 +1715,33 @@ pub async fn count_flows(
     status: Option<&str>,
     search: Option<&str>,
 ) -> Result<i64, AutomationError> {
+    count_flows_scoped(pool, None, status, search).await
+}
+
+/// Counts live flows owned by `owner_id` for paginated responses.
+pub async fn count_flows_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: &str,
+    status: Option<&str>,
+    search: Option<&str>,
+) -> Result<i64, AutomationError> {
+    count_flows_scoped(pool, Some(owner_id), status, search).await
+}
+
+async fn count_flows_scoped(
+    pool: &sqlx::PgPool,
+    owner_id: Option<&str>,
+    status: Option<&str>,
+    search: Option<&str>,
+) -> Result<i64, AutomationError> {
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM automation_flows \
          WHERE deleted_at IS NULL \
-           AND ($1::text IS NULL OR status = $1) \
-           AND ($2::text IS NULL OR name ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')",
+           AND ($1::text IS NULL OR owner_id = $1) \
+           AND ($2::text IS NULL OR status = $2) \
+           AND ($3::text IS NULL OR name ILIKE '%' || $3 || '%' OR description ILIKE '%' || $3 || '%')",
     )
+    .bind(owner_id)
     .bind(status)
     .bind(search)
     .fetch_one(pool)

@@ -28,6 +28,12 @@ pub struct MarketDataConfig {
     /// task does NOT trigger it. Set `false` to enable reconciliation
     /// in dev.
     pub reconcile_deferred: bool,
+    /// Global and per-provider concurrent call limit.
+    pub provider_max_concurrency: u32,
+    /// Maximum provider attempts per identifier/date.
+    pub provider_max_retries: u32,
+    /// Exponential backoff cap in seconds.
+    pub provider_max_backoff_seconds: u64,
     /// When `true`, the server spawns the scheduled task on `serve()`.
     /// Default `false` so tests / CI can boot without scheduled work.
     pub run_scheduled_tasks: bool,
@@ -40,6 +46,9 @@ impl Default for MarketDataConfig {
             eod_interval_seconds: 86_400,
             refresh_batch_size: 50,
             reconcile_deferred: true,
+            provider_max_concurrency: 4,
+            provider_max_retries: 3,
+            provider_max_backoff_seconds: 30,
             run_scheduled_tasks: false,
         }
     }
@@ -106,7 +115,36 @@ impl MarketDataConfig {
                 ));
             }
         }
+        if !(1..=64).contains(&self.provider_max_concurrency) {
+            return Err(MarketDataProviderError::Validation(format!(
+                "MARKET_DATA_PROVIDER_MAX_CONCURRENCY must be in 1..=64 (got {})",
+                self.provider_max_concurrency
+            )));
+        }
+        if !(1..=10).contains(&self.provider_max_retries) {
+            return Err(MarketDataProviderError::Validation(format!(
+                "MARKET_DATA_PROVIDER_MAX_RETRIES must be in 1..=10 (got {})",
+                self.provider_max_retries
+            )));
+        }
+        if !(1..=300).contains(&self.provider_max_backoff_seconds) {
+            return Err(MarketDataProviderError::Validation(format!(
+                "MARKET_DATA_PROVIDER_MAX_BACKOFF_SECONDS must be in 1..=300 (got {})",
+                self.provider_max_backoff_seconds
+            )));
+        }
         Ok(())
+    }
+
+    /// Builds the shared provider budget this configuration describes.
+    ///
+    /// Implements FR-014 of `specs/034-production-hardening/spec.md`.
+    pub fn provider_budget(&self) -> crate::market_data::registry::ProviderBudget {
+        crate::market_data::registry::ProviderBudget::new(
+            self.provider_max_concurrency as usize,
+            self.provider_max_retries,
+            std::time::Duration::from_secs(self.provider_max_backoff_seconds),
+        )
     }
 }
 
