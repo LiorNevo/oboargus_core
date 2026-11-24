@@ -8,9 +8,9 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,6 +18,10 @@ use crate::domain::asset::read::get_asset;
 use crate::domain::asset_identifier::read::list_asset_identifiers;
 use crate::domain::id::AssetId;
 use crate::market_data::audit::{LoadRunContext, finish_load_run, start_load_run_with_context};
+use crate::market_data::calendar::{
+    CalendarExceptionKind, CalendarSegment, ExchangeCalendar, expected_sessions_for_segments,
+    is_trading_day, resolve_timeline,
+};
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::load::{DataSourceLoadCounters, RunStatus, StoreOutcome, store_price_bar};
@@ -72,6 +76,14 @@ pub struct HistoryLoadReport {
     pub loaded: usize,
     /// Bars already known identically.
     pub no_op: usize,
+    /// Completed expected sessions in the window.
+    pub expected_sessions: usize,
+    /// Full-day calendar closures in the window.
+    pub closed_sessions: usize,
+    /// Stored bars whose date the calendar says was closed.
+    pub unexpected_sessions: usize,
+    /// The single exact MIC when the whole window uses one calendar.
+    pub calendar_mic: Option<String>,
     /// True when the source answered with no bars in the window.
     pub no_data: bool,
     /// Transient/infrastructure failures.
@@ -161,6 +173,48 @@ fn classify_walk_failure(
     }
 }
 
+fn counted_closures(
+    segments: &[CalendarSegment],
+    calendars: &BTreeMap<String, ExchangeCalendar>,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> BTreeSet<NaiveDate> {
+    let mut closed = BTreeSet::new();
+    for segment in segments.iter().filter(|segment| segment.exact) {
+        let Some(calendar) = segment.mic.as_ref().and_then(|mic| calendars.get(mic)) else {
+            continue;
+        };
+        for exception in &calendar.exceptions {
+            if exception.kind == CalendarExceptionKind::Closure
+                && exception.date >= from
+                && exception.date <= to
+            {
+                closed.insert(exception.date);
+            }
+        }
+    }
+    closed
+}
+
+fn is_unexpected_session(
+    segments: &[CalendarSegment],
+    calendars: &BTreeMap<String, ExchangeCalendar>,
+    date: NaiveDate,
+) -> bool {
+    let Some(segment) = segments
+        .iter()
+        .find(|segment| segment.from <= date && date <= segment.to)
+    else {
+        return false;
+    };
+    if segment.exact
+        && let Some(calendar) = segment.mic.as_ref().and_then(|mic| calendars.get(mic))
+    {
+        return !is_trading_day(calendar, date);
+    }
+    matches!(date.weekday().num_days_from_monday(), 5 | 6)
+}
+
 /// Loads one bounded window for an existing asset.
 ///
 /// Implements FR-035 / FR-039 / FR-043 of spec 031. It does not create
@@ -186,6 +240,28 @@ pub async fn run_asset_history_load(
             "the asset has no identifier that a source can resolve".into(),
         )
     })?;
+
+    let (segments, calendars) = resolve_timeline(pool, config.asset_id, config.from, config.to)
+        .await
+        .map_err(|error| {
+            MarketDataProviderError::Infrastructure(format!("calendar resolution: {error}"))
+        })?;
+    let expected = expected_sessions_for_segments(&segments, &calendars, Utc::now());
+    let closed_dates = counted_closures(&segments, &calendars, config.from, config.to);
+    let calendar_mic = {
+        let mics: BTreeSet<_> = segments
+            .iter()
+            .filter(|segment| segment.exact)
+            .filter_map(|segment| segment.mic.clone())
+            .collect();
+        if segments.iter().all(|segment| segment.exact) && mics.len() == 1 {
+            mics.into_iter().next()
+        } else {
+            None
+        }
+    };
+    let expected_sessions = expected.len();
+    let closed_sessions = closed_dates.len();
 
     let started_at = Utc::now();
     let context = LoadRunContext {
@@ -215,6 +291,57 @@ pub async fn run_asset_history_load(
     )
     .await?;
 
+    if expected_sessions == 0 {
+        let counters = DataSourceLoadCounters {
+            calendar_closed: closed_sessions as i64,
+            ..DataSourceLoadCounters::default()
+        };
+        let empty = serde_json::json!({});
+        let per_identifier = serde_json::json!([{
+            "identifier": { "scheme": identifier.scheme, "value": identifier.value },
+            "asset_id": config.asset_id.0,
+            "source_id": serde_json::Value::Null,
+            "loaded": 0,
+            "no_op": 0,
+            "no_data": false,
+            "calendar_closed": closed_sessions,
+        }]);
+        finish_load_run(
+            pool,
+            run.id,
+            closed_sessions as i32,
+            0,
+            &counters,
+            &empty,
+            &empty,
+            &per_identifier,
+        )
+        .await?;
+        let ended_at = Utc::now();
+        return Ok(HistoryLoadReport {
+            report_version: 1,
+            run_id: Some(run.id),
+            asset_id: config.asset_id.0,
+            from: config.from,
+            to: config.to,
+            status: RunStatus::Complete,
+            source_id: None,
+            loaded: 0,
+            no_op: 0,
+            expected_sessions,
+            closed_sessions,
+            unexpected_sessions: 0,
+            calendar_mic,
+            no_data: false,
+            source_unavailable: 0,
+            rate_limited: 0,
+            rejected: 0,
+            storage_failure: 0,
+            duration_ms: (ended_at - started_at).num_milliseconds().max(0) as u64,
+            message: Some("The range has no expected trading sessions.".to_string()),
+        });
+    }
+
     let snapshot = registry.snapshot();
     let walk = snapshot
         .walk_historical_range(
@@ -232,6 +359,7 @@ pub async fn run_asset_history_load(
     let mut per_source_failed: BTreeMap<String, i64> = BTreeMap::new();
     let mut source_id: Option<String> = None;
     let mut no_data = false;
+    let mut unexpected_sessions = 0usize;
     let mut message: Option<String> = None;
 
     for failure in &walk.failures {
@@ -262,6 +390,9 @@ pub async fn run_asset_history_load(
         } else {
             for bar in bars {
                 let as_of_date = bar.as_of_date;
+                if is_unexpected_session(&segments, &calendars, as_of_date) {
+                    unexpected_sessions += 1;
+                }
                 let (outcome, _) = store_price_bar(
                     pool,
                     config.asset_id,
@@ -302,6 +433,7 @@ pub async fn run_asset_history_load(
         "loaded": counters.loaded,
         "no_op": counters.no_op,
         "no_data": no_data,
+        "calendar_closed": counters.calendar_closed,
     }]);
 
     // The audit table requires requested - duplicated = attempted. A history
@@ -330,6 +462,10 @@ pub async fn run_asset_history_load(
         source_id,
         loaded: counters.loaded as usize,
         no_op: counters.no_op as usize,
+        expected_sessions,
+        closed_sessions,
+        unexpected_sessions,
+        calendar_mic,
         no_data,
         source_unavailable: counters.source_unavailable as usize,
         rate_limited: counters.rate_limited as usize,

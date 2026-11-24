@@ -142,7 +142,20 @@ async fn migration_creates_auth_ownership_schema_and_backfills_legacy_rows() {
     };
 
     // Normalize a database left behind by an interrupted earlier test run,
-    // then prove a fresh execution is a no-op.
+    // then prove a fresh execution is a no-op. The current history view has
+    // columns added by a later migration, so stash it while 0014 recreates its
+    // own shape.
+    let view_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('data_load_history') IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("view exists");
+    if view_exists {
+        sqlx::query("ALTER VIEW data_load_history RENAME TO data_load_history_saved")
+            .execute(&pool)
+            .await
+            .expect("stash history view");
+    }
     sqlx::raw_sql(MIGRATION_0014)
         .execute(&pool)
         .await
@@ -606,4 +619,15 @@ async fn migration_creates_auth_ownership_schema_and_backfills_legacy_rows() {
             Some("owner-a".to_string()),
         )
     );
+
+    if view_exists {
+        sqlx::query("DROP VIEW data_load_history")
+            .execute(&pool)
+            .await
+            .expect("drop 0014 view");
+        sqlx::query("ALTER VIEW data_load_history_saved RENAME TO data_load_history")
+            .execute(&pool)
+            .await
+            .expect("restore history view");
+    }
 }

@@ -79,6 +79,8 @@ pub struct LoadHistoryEntry {
     pub not_resolved: i32,
     /// No-data count.
     pub no_data_for_date: i32,
+    /// Calendar-closed count.
+    pub calendar_closed: i32,
     /// Unsupported-scheme count.
     pub unsupported_scheme: i32,
     /// Rejected count.
@@ -109,6 +111,8 @@ pub struct LoadHistoryEntry {
     pub dates_completed: i32,
     /// Dates with at least one stored row.
     pub dates_with_loads: i32,
+    /// Dates whose only outcome was a calendar closure.
+    pub dates_fully_closed: i32,
     /// Window used by a range.
     pub range_concurrency: Option<i32>,
     /// Source-change source id.
@@ -196,6 +200,8 @@ pub struct RangeRunDetail {
     pub dates_with_loads: usize,
     /// Dates with nothing stored.
     pub dates_with_nothing_stored: usize,
+    /// Dates whose only outcome was a calendar closure.
+    pub dates_fully_closed: usize,
     /// Summed counters.
     pub totals: RangeLoadTotals,
     /// Ascending date sections.
@@ -219,6 +225,10 @@ pub struct RangeProgress {
     pub dates_failed: usize,
     /// Dates with loads.
     pub dates_with_loads: usize,
+    /// Summed calendar-closed identifiers.
+    pub calendar_closed: usize,
+    /// Dates whose only outcome was a calendar closure.
+    pub dates_fully_closed: usize,
     /// Earliest child start.
     pub started_at: Option<DateTime<Utc>>,
     /// Latest child transition (or now while starting).
@@ -256,6 +266,7 @@ struct HistoryRow {
     no_op: i32,
     not_resolved: i32,
     no_data_for_date: i32,
+    calendar_closed: i32,
     unsupported_scheme: i32,
     rejected: i32,
     source_unavailable: i32,
@@ -270,6 +281,7 @@ struct HistoryRow {
     dates_requested: i32,
     dates_completed: i32,
     dates_with_loads: i32,
+    dates_fully_closed: i32,
     range_concurrency: Option<i32>,
     source_id: Option<String>,
     before_enabled: Option<bool>,
@@ -292,6 +304,8 @@ type ProgressAggregate = (
     i64,
     i64,
     i64,
+    i64,
+    i64,
     Option<DateTime<Utc>>,
     Option<DateTime<Utc>>,
 );
@@ -299,10 +313,10 @@ type ProgressAggregate = (
 const HISTORY_SELECT: &str = "SELECT entry_id, entry_type, started_at, ended_at, \
     data_domain, requested_source, answering_sources, identifiers_requested_raw, \
     identifiers_duplicated, identifiers_attempted, loaded, no_op, not_resolved, \
-    no_data_for_date, unsupported_scheme, rejected, source_unavailable, \
+    no_data_for_date, calendar_closed, unsupported_scheme, rejected, source_unavailable, \
     rate_limited, storage_failure, assets_created, assets_adopted, status, \
     duration_ms, date_from, date_to, dates_requested, dates_completed, \
-    dates_with_loads, range_concurrency, source_id, \
+    dates_with_loads, dates_fully_closed, range_concurrency, source_id, \
     before_enabled, after_enabled, actor FROM data_load_history";
 
 const HISTORY_FILTER: &str = " WHERE ($1::date IS NULL OR started_at >= $1::date) \
@@ -396,6 +410,7 @@ impl HistoryRow {
             no_op: self.no_op,
             not_resolved: self.not_resolved,
             no_data_for_date: self.no_data_for_date,
+            calendar_closed: self.calendar_closed,
             unsupported_scheme: self.unsupported_scheme,
             rejected: self.rejected,
             source_unavailable: self.source_unavailable,
@@ -411,6 +426,7 @@ impl HistoryRow {
             dates_requested: self.dates_requested,
             dates_completed: self.dates_completed,
             dates_with_loads: self.dates_with_loads,
+            dates_fully_closed: self.dates_fully_closed,
             range_concurrency: self.range_concurrency,
             source_id: self.source_id,
             before_enabled: self.before_enabled,
@@ -535,7 +551,7 @@ async fn get_group_rows(
     let rows: Vec<LoadRunRow> = sqlx::query_as(
         "SELECT id, started_at, ended_at, trigger, requested_source, \
          identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, \
-         loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, \
+         loaded, no_op, not_resolved, no_data_for_date, calendar_closed, unsupported_scheme, \
          rejected, source_unavailable, rate_limited, storage_failure, \
          assets_created, assets_adopted, per_source_attempted, per_source_failed, \
          per_identifier, duration_ms, data_domain, as_of_date, range_group_id, \
@@ -605,6 +621,7 @@ fn report_from_row(
         no_op: row.no_op.max(0) as usize,
         not_resolved: row.not_resolved.max(0) as usize,
         no_data_for_date: row.no_data_for_date.max(0) as usize,
+        calendar_closed: row.calendar_closed.max(0) as usize,
         unsupported_scheme: row.unsupported_scheme.max(0) as usize,
         rejected: row.rejected.max(0) as usize,
         source_unavailable: row.source_unavailable.max(0) as usize,
@@ -630,6 +647,7 @@ fn range_from_rows(
     let mut totals = RangeLoadTotals::default();
     let mut dates_with_loads = 0usize;
     let mut dates_with_nothing_stored = 0usize;
+    let mut dates_fully_closed = 0usize;
     for row in rows.into_iter().filter(|row| row.ended_at.is_some()) {
         let status = child_status(&row);
         let report = report_from_row(&row, status)?;
@@ -638,6 +656,7 @@ fn range_from_rows(
         totals.no_op += report.no_op;
         totals.not_resolved += report.not_resolved;
         totals.no_data_for_date += report.no_data_for_date;
+        totals.calendar_closed += report.calendar_closed;
         totals.unsupported_scheme += report.unsupported_scheme;
         totals.rejected += report.rejected;
         totals.source_unavailable += report.source_unavailable;
@@ -650,6 +669,20 @@ fn range_from_rows(
         }
         if report.loaded == 0 && report.no_op == 0 {
             dates_with_nothing_stored += 1;
+        }
+        if report.calendar_closed > 0
+            && report.identifiers_attempted == 0
+            && report.not_resolved == 0
+            && report.loaded == 0
+            && report.no_op == 0
+            && report.no_data_for_date == 0
+            && report.rejected == 0
+            && report.source_unavailable == 0
+            && report.rate_limited == 0
+            && report.storage_failure == 0
+            && report.unsupported_scheme == 0
+        {
+            dates_fully_closed += 1;
         }
         let date = row
             .as_of_date
@@ -687,6 +720,7 @@ fn range_from_rows(
         dates_completed: entry.dates_completed.max(0) as usize,
         dates_with_loads,
         dates_with_nothing_stored,
+        dates_fully_closed,
         totals,
         dates,
     })
@@ -754,6 +788,8 @@ async fn legacy_progress(
         i64,
         i64,
         i64,
+        i64,
+        i64,
         Option<DateTime<Utc>>,
         Option<DateTime<Utc>>,
         Option<NaiveDate>,
@@ -763,6 +799,13 @@ async fn legacy_progress(
         "SELECT COUNT(*), \
                 COUNT(*) FILTER (WHERE ended_at IS NOT NULL AND terminal_status <> 'interrupted'), \
                 COUNT(*) FILTER (WHERE loaded > 0), \
+                COALESCE(SUM(calendar_closed), 0), \
+                COUNT(*) FILTER (WHERE calendar_closed > 0 \
+                    AND identifiers_attempted = 0 AND not_resolved = 0 \
+                    AND loaded = 0 AND no_op = 0 AND no_data_for_date = 0 \
+                    AND rejected = 0 AND source_unavailable = 0 \
+                    AND rate_limited = 0 AND storage_failure = 0 \
+                    AND unsupported_scheme = 0), \
                 MIN(started_at), MAX(COALESCE(ended_at, started_at)), \
                 MIN(range_from), MAX(range_to) \
          FROM reference_data_load_runs WHERE range_group_id = $1 \
@@ -773,7 +816,17 @@ async fn legacy_progress(
     .fetch_one(pool)
     .await
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("legacy_progress: {e}")))?;
-    let (total, completed, with_loads, started_at, updated_at, from, to) = row;
+    let (
+        total,
+        completed,
+        with_loads,
+        calendar_closed,
+        dates_fully_closed,
+        started_at,
+        updated_at,
+        from,
+        to,
+    ) = row;
     if total == 0 {
         return if starting_when_empty {
             Ok(RangeProgress {
@@ -783,6 +836,8 @@ async fn legacy_progress(
                 dates_completed: 0,
                 dates_failed: 0,
                 dates_with_loads: 0,
+                calendar_closed: 0,
+                dates_fully_closed: 0,
                 started_at: None,
                 updated_at: Utc::now(),
             })
@@ -843,6 +898,8 @@ async fn legacy_progress(
         dates_completed: completed as usize,
         dates_failed,
         dates_with_loads: with_loads as usize,
+        calendar_closed: calendar_closed.max(0) as usize,
+        dates_fully_closed: dates_fully_closed.max(0) as usize,
         started_at,
         updated_at: updated_at.unwrap_or_else(Utc::now),
     })
@@ -882,6 +939,13 @@ pub async fn range_progress_for_owner(
                 COUNT(*) FILTER (WHERE terminal_status = 'failed'), \
                 COUNT(*) FILTER (WHERE ended_at IS NULL), \
                 COUNT(*) FILTER (WHERE loaded > 0), \
+                COALESCE(SUM(calendar_closed), 0), \
+                COUNT(*) FILTER (WHERE calendar_closed > 0 \
+                    AND identifiers_attempted = 0 AND not_resolved = 0 \
+                    AND loaded = 0 AND no_op = 0 AND no_data_for_date = 0 \
+                    AND rejected = 0 AND source_unavailable = 0 \
+                    AND rate_limited = 0 AND storage_failure = 0 \
+                    AND unsupported_scheme = 0), \
                 MIN(started_at), MAX(COALESCE(ended_at, started_at)) \
          FROM reference_data_load_runs WHERE range_group_id = $1",
     )
@@ -892,7 +956,17 @@ pub async fn range_progress_for_owner(
         MarketDataProviderError::Infrastructure(format!("range_progress aggregate: {e}"))
     })?;
 
-    let (total, completed, failed, open, with_loads, first_started, last_transition) = aggregate;
+    let (
+        total,
+        completed,
+        failed,
+        open,
+        with_loads,
+        calendar_closed,
+        dates_fully_closed,
+        first_started,
+        last_transition,
+    ) = aggregate;
 
     // An accepted stop with no child in flight can be finalized immediately;
     // the background task may already have exited (for example after a crash
@@ -923,6 +997,8 @@ pub async fn range_progress_for_owner(
         dates_completed: completed as usize,
         dates_failed: failed as usize,
         dates_with_loads: with_loads as usize,
+        calendar_closed: calendar_closed.max(0) as usize,
+        dates_fully_closed: dates_fully_closed.max(0) as usize,
         started_at: Some(group.started_at).or(first_started),
         updated_at: group.ended_at.or(last_transition).unwrap_or_else(Utc::now),
     })
@@ -1103,6 +1179,7 @@ mod tests {
             no_op: 0,
             not_resolved: 0,
             no_data_for_date: 0,
+            calendar_closed: 0,
             unsupported_scheme: 0,
             rejected: 0,
             source_unavailable: 0,
@@ -1117,6 +1194,7 @@ mod tests {
             dates_requested: 1,
             dates_completed: 1,
             dates_with_loads: 1,
+            dates_fully_closed: 0,
             range_concurrency: None,
             source_id: None,
             before_enabled: None,
@@ -1139,6 +1217,7 @@ mod tests {
             no_op: 0,
             not_resolved: 0,
             no_data_for_date: 0,
+            calendar_closed: 0,
             unsupported_scheme: 0,
             rejected: 0,
             source_unavailable: 0,

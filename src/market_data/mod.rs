@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod calendar;
 pub mod config;
 pub mod data_domain;
 pub mod data_sources;

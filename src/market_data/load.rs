@@ -22,9 +22,11 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use chrono::{NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::domain::asset::create::create_asset_with_identifier;
@@ -33,6 +35,7 @@ use crate::domain::asset_identifier::read as asset_identifier_read;
 use crate::domain::error::DomainError;
 use crate::domain::id::AssetId;
 use crate::market_data::audit::{LoadRunContext, finish_load_run, start_load_run_with_context};
+use crate::market_data::calendar::CalendarCache;
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::identifier_mapping::{
@@ -88,6 +91,9 @@ pub enum LoadOutcome {
     /// date — a non-trading day, or an upstream that does not recognize the
     /// identifier's symbol.
     NoDataForDate,
+    /// The resolved exchange calendar says the date is a full-day closure, so
+    /// no provider was contacted.
+    CalendarClosed,
     /// No enabled source claims the identifier's scheme.
     UnsupportedScheme,
     /// The source refused or could not answer this identifier for a
@@ -312,6 +318,8 @@ pub struct DataSourceLoadCounters {
     pub not_resolved: i64,
     /// The source holds no value for that date.
     pub no_data_for_date: i64,
+    /// The exchange calendar closed the date; no provider was contacted.
+    pub calendar_closed: i64,
     /// No enabled source claims the identifier's scheme.
     pub unsupported_scheme: i64,
     /// The source refused the request.
@@ -352,7 +360,7 @@ impl DataSourceLoadCounters {
     ///
     /// Implements FR-005 of spec 018.
     pub fn total_requested(&self) -> i64 {
-        self.total_attempted() + self.not_resolved
+        self.total_attempted() + self.not_resolved + self.calendar_closed
     }
 
     /// The number of identifiers that ended in a failure bucket.
@@ -371,6 +379,7 @@ impl DataSourceLoadCounters {
             LoadOutcome::NoOp => self.no_op += 1,
             LoadOutcome::NotResolved => self.not_resolved += 1,
             LoadOutcome::NoDataForDate => self.no_data_for_date += 1,
+            LoadOutcome::CalendarClosed => self.calendar_closed += 1,
             LoadOutcome::UnsupportedScheme => self.unsupported_scheme += 1,
             LoadOutcome::Rejected => self.rejected += 1,
             LoadOutcome::SourceUnavailable => self.source_unavailable += 1,
@@ -441,6 +450,8 @@ pub struct IdentifierLoadReport {
     pub not_resolved: usize,
     /// The source holds no value for that date.
     pub no_data_for_date: usize,
+    /// The exchange calendar closed the date without a provider call.
+    pub calendar_closed: usize,
     /// No enabled source claims the identifier's scheme.
     pub unsupported_scheme: usize,
     /// The source refused the request.
@@ -513,6 +524,28 @@ pub async fn run_identifier_load_with_snapshot(
     config: IdentifierLoadConfig,
     context: &LoadRunContext,
 ) -> Result<IdentifierLoadReport, MarketDataProviderError> {
+    let cache = Arc::new(Mutex::new(CalendarCache::new(
+        config.as_of_date,
+        config.as_of_date,
+    )));
+    run_identifier_load_with_snapshot_and_calendar(pool, snapshot, config, context, Some(cache))
+        .await
+}
+
+/// Single-date load with a caller-owned, run-scoped calendar cache.
+///
+/// The range wrapper shares one cache across dates so each asset resolves at
+/// most once. `None` disables calendar checks (used by dry runs and callers
+/// that have no database).
+///
+/// Implements FR-011 and FR-012 of spec 035.
+pub async fn run_identifier_load_with_snapshot_and_calendar(
+    pool: Option<&sqlx::PgPool>,
+    snapshot: &RegistrySnapshot,
+    config: IdentifierLoadConfig,
+    context: &LoadRunContext,
+    calendar: Option<Arc<Mutex<CalendarCache>>>,
+) -> Result<IdentifierLoadReport, MarketDataProviderError> {
     validate_request_with_snapshot(&config, snapshot)?;
 
     let requested_raw = config.identifiers.len();
@@ -571,6 +604,7 @@ pub async fn run_identifier_load_with_snapshot(
             snapshot,
             identifier,
             &config,
+            calendar.as_ref(),
             &mut counters,
             &mut per_source_attempted,
             &mut per_source_failed,
@@ -694,6 +728,7 @@ fn dry_run_report(
         no_op: 0,
         not_resolved: 0,
         no_data_for_date: 0,
+        calendar_closed: 0,
         unsupported_scheme: 0,
         rejected: 0,
         source_unavailable: 0,
@@ -719,6 +754,7 @@ async fn process_identifier(
     snapshot: &RegistrySnapshot,
     identifier: &TypedIdentifier,
     config: &IdentifierLoadConfig,
+    calendar: Option<&Arc<Mutex<CalendarCache>>>,
     counters: &mut DataSourceLoadCounters,
     per_source_attempted: &mut BTreeMap<String, usize>,
     per_source_failed: &mut BTreeMap<String, usize>,
@@ -883,6 +919,28 @@ async fn process_identifier(
     };
 
     let asset_id = AssetId(asset.id);
+
+    if let Some(cache) = calendar {
+        let closed = cache
+            .lock()
+            .await
+            .is_closed(pool, asset_id, as_of_date)
+            .await;
+        if closed {
+            counters.increment(LoadOutcome::CalendarClosed);
+            return outcome_line(
+                identifier,
+                Some(asset_id.0),
+                false,
+                LoadOutcome::CalendarClosed,
+                None,
+                per_source,
+                creation,
+                None,
+            );
+        }
+    }
+
     let walk = snapshot
         .walk_historical_range(
             build_range_request(identifier, as_of_date),
@@ -1637,6 +1695,7 @@ fn build_report(
         no_op: counters.no_op as usize,
         not_resolved: counters.not_resolved as usize,
         no_data_for_date: counters.no_data_for_date as usize,
+        calendar_closed: counters.calendar_closed as usize,
         unsupported_scheme: counters.unsupported_scheme as usize,
         rejected: counters.rejected as usize,
         source_unavailable: counters.source_unavailable as usize,
@@ -1840,6 +1899,7 @@ mod tests {
             no_op: 2,
             not_resolved: 1,
             no_data_for_date: 4,
+            calendar_closed: 0,
             unsupported_scheme: 1,
             rejected: 1,
             source_unavailable: 2,
@@ -2280,6 +2340,7 @@ mod tests {
             no_op: 1,
             not_resolved: 1,
             no_data_for_date: 1,
+            calendar_closed: 0,
             unsupported_scheme: 1,
             rejected: 1,
             source_unavailable: 1,

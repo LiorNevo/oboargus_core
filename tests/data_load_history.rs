@@ -970,3 +970,91 @@ async fn history_filters_entries_and_reports_progress() {
     assert_eq!(progress.status, "complete");
     assert_eq!(progress.dates_with_loads, 1);
 }
+
+#[tokio::test]
+async fn calendar_closed_children_are_visible_in_history_and_progress() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    let from = NaiveDate::from_ymd_opt(2026, 11, 27).expect("date");
+    let to = NaiveDate::from_ymd_opt(2026, 11, 28).expect("date");
+    let group_id = Uuid::new_v4();
+
+    let closed = start_load_run_with_context(
+        &pool,
+        "test",
+        None,
+        &LoadRunContext::market_data_range(from, group_id, from, to, 1),
+    )
+    .await
+    .expect("closed run");
+    let closed_counters = DataSourceLoadCounters {
+        calendar_closed: 1,
+        ..DataSourceLoadCounters::default()
+    };
+    finish_load_run(
+        &pool,
+        closed.id,
+        closed_counters.total_requested() as i32,
+        0,
+        &closed_counters,
+        &serde_json::json!({}),
+        &serde_json::json!({}),
+        &serde_json::json!([]),
+    )
+    .await
+    .expect("finish closed run");
+
+    let loaded = start_load_run_with_context(
+        &pool,
+        "test",
+        None,
+        &LoadRunContext::market_data_range(to, group_id, from, to, 1),
+    )
+    .await
+    .expect("loaded run");
+    finish_load_run(
+        &pool,
+        loaded.id,
+        counters(1, 0).total_requested() as i32,
+        0,
+        &counters(1, 0),
+        &serde_json::json!({"yahoo_finance": 1}),
+        &serde_json::json!({}),
+        &identifier_lines("yahoo_finance"),
+    )
+    .await
+    .expect("finish loaded run");
+
+    let progress = range_progress(&pool, group_id).await.expect("progress");
+    assert_eq!(progress.calendar_closed, 1);
+    assert_eq!(progress.dates_fully_closed, 1);
+    assert_eq!(progress.dates_completed, 2);
+
+    let detail = get_history_detail(&pool, group_id, 60)
+        .await
+        .expect("detail");
+    let range = detail.range.expect("range detail");
+    assert_eq!(range.totals.calendar_closed, 1);
+    assert_eq!(range.dates_fully_closed, 1);
+    assert_eq!(range.dates[0].report.calendar_closed, 1);
+
+    let page = list_history(
+        &pool,
+        &HistoryFilter {
+            entry_type: Some("range_run".to_string()),
+            ..HistoryFilter::default()
+        },
+        60,
+    )
+    .await
+    .expect("history");
+    let entry = page
+        .entries
+        .iter()
+        .find(|entry| entry.entry_id == group_id)
+        .expect("range entry");
+    assert_eq!(entry.calendar_closed, 1);
+    assert_eq!(entry.dates_fully_closed, 1);
+    guard.cleanup().await;
+}

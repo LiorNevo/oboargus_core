@@ -1,0 +1,4902 @@
+{
+  "seed_version": 1,
+  "provenance": "US-equity schedules 2016-2028; seed 1",
+  "calendars": [
+    {
+      "mic": "XNAS",
+      "name": "Nasdaq Global Select Market",
+      "time_zone": "America/New_York",
+      "coverage_from": "2016-01-01",
+      "coverage_to": "2028-12-31",
+      "weekdays": [
+        {
+          "iso_weekday": 1,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 2,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 3,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 4,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 5,
+          "open": "09:30",
+          "close": "16:00"
+        }
+      ],
+      "exceptions": [
+        {
+          "date": "2016-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-03-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-03-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-05-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-09-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-11-22",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-02-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-04-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-04-10",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-04-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-04-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-06-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-04-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-03-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-09",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-04-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-05-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-09-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-11-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-02-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-04-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-03-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-06-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-11-23",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2021-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2022-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-11-28",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2027-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        }
+      ],
+      "source": "bundled",
+      "provenance": "US-equity published holiday/session schedule seed 1; verify before redistribution",
+      "version": 1,
+      "active": true
+    },
+    {
+      "mic": "XNYS",
+      "name": "New York Stock Exchange",
+      "time_zone": "America/New_York",
+      "coverage_from": "2016-01-01",
+      "coverage_to": "2028-12-31",
+      "weekdays": [
+        {
+          "iso_weekday": 1,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 2,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 3,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 4,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 5,
+          "open": "09:30",
+          "close": "16:00"
+        }
+      ],
+      "exceptions": [
+        {
+          "date": "2016-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-03-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-03-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-05-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-09-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-11-22",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-02-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-04-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-04-10",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-04-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-04-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-06-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-04-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-03-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-09",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-04-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-05-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-09-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-11-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-02-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-04-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-03-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-06-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-11-23",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2021-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2022-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-11-28",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2027-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        }
+      ],
+      "source": "bundled",
+      "provenance": "US-equity published holiday/session schedule seed 1; verify before redistribution",
+      "version": 1,
+      "active": true
+    },
+    {
+      "mic": "ARCX",
+      "name": "NYSE Arca",
+      "time_zone": "America/New_York",
+      "coverage_from": "2016-01-01",
+      "coverage_to": "2028-12-31",
+      "weekdays": [
+        {
+          "iso_weekday": 1,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 2,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 3,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 4,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 5,
+          "open": "09:30",
+          "close": "16:00"
+        }
+      ],
+      "exceptions": [
+        {
+          "date": "2016-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-03-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-03-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-05-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-09-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-11-22",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-02-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-04-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-04-10",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-04-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-04-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-06-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-04-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-03-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-09",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-04-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-05-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-09-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-11-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-02-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-04-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-03-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-06-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-11-23",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2021-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2022-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-11-28",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2027-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        }
+      ],
+      "source": "bundled",
+      "provenance": "US-equity published holiday/session schedule seed 1; verify before redistribution",
+      "version": 1,
+      "active": true
+    },
+    {
+      "mic": "XASE",
+      "name": "NYSE American",
+      "time_zone": "America/New_York",
+      "coverage_from": "2016-01-01",
+      "coverage_to": "2028-12-31",
+      "weekdays": [
+        {
+          "iso_weekday": 1,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 2,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 3,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 4,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 5,
+          "open": "09:30",
+          "close": "16:00"
+        }
+      ],
+      "exceptions": [
+        {
+          "date": "2016-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-03-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-03-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-05-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-09-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-11-22",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-02-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-04-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-04-10",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-04-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-04-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-06-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-04-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-03-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-09",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-04-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-05-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-09-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-11-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-02-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-04-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-03-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-06-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-11-23",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2021-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2022-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-11-28",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2027-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        }
+      ],
+      "source": "bundled",
+      "provenance": "US-equity published holiday/session schedule seed 1; verify before redistribution",
+      "version": 1,
+      "active": true
+    },
+    {
+      "mic": "BATS",
+      "name": "Cboe BZX Exchange",
+      "time_zone": "America/New_York",
+      "coverage_from": "2016-01-01",
+      "coverage_to": "2028-12-31",
+      "weekdays": [
+        {
+          "iso_weekday": 1,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 2,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 3,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 4,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 5,
+          "open": "09:30",
+          "close": "16:00"
+        }
+      ],
+      "exceptions": [
+        {
+          "date": "2016-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-03-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-03-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-05-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-09-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-11-22",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-02-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-04-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-04-10",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-04-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-04-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-06-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-04-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-03-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-09",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-04-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-05-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-09-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-11-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-02-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-04-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-03-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-06-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-11-23",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2021-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2022-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-11-28",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2027-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        }
+      ],
+      "source": "bundled",
+      "provenance": "US-equity published holiday/session schedule seed 1; verify before redistribution",
+      "version": 1,
+      "active": true
+    },
+    {
+      "mic": "OTC",
+      "name": "OTC Markets",
+      "time_zone": "America/New_York",
+      "coverage_from": "2016-01-01",
+      "coverage_to": "2028-12-31",
+      "weekdays": [
+        {
+          "iso_weekday": 1,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 2,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 3,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 4,
+          "open": "09:30",
+          "close": "16:00"
+        },
+        {
+          "iso_weekday": 5,
+          "open": "09:30",
+          "close": "16:00"
+        }
+      ],
+      "exceptions": [
+        {
+          "date": "2016-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-03-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2017-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-03-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-05-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-09-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-11-22",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2018-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-01-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-02-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-04-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2019-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-04-10",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2020-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-04-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2021-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-04-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-05-30",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-06-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-09-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-11-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2022-12-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-01-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-02-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-04-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2023-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-01-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-02-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-03-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-05-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-09-02",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-11-28",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2024-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-09",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-01-20",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-02-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-04-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-05-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-09-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-11-27",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2025-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-01-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-02-16",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-04-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-05-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-07-03",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-09-07",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-11-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2026-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-01",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-01-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-02-15",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-03-26",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-05-31",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-06-18",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-07-05",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-09-06",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-11-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2027-12-24",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-01-17",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-02-21",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-04-14",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-05-29",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-06-19",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-07-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-09-04",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-11-23",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2028-12-25",
+          "kind": "closure",
+          "reason": "US equity market holiday"
+        },
+        {
+          "date": "2016-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2017-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-11-23",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2018-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2019-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2020-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2021-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2022-11-25",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2023-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-11-29",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2024-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-11-28",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2025-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-11-27",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2026-12-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2027-11-26",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-07-03",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        },
+        {
+          "date": "2028-11-24",
+          "kind": "early_close",
+          "close": "13:00",
+          "reason": "Scheduled early close"
+        }
+      ],
+      "source": "bundled",
+      "provenance": "US-equity published holiday/session schedule seed 1; verify before redistribution",
+      "version": 1,
+      "active": true
+    }
+  ]
+}

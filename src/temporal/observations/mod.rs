@@ -509,10 +509,12 @@ pub async fn observation_at(
 
 /// Creates one monthly partition if it does not already exist.
 ///
-/// The creation runs in its own transaction under a transaction-scoped
-/// advisory lock keyed by `(year, month)`, so concurrent callers (startup,
-/// maintenance, and load paths) serialize instead of racing on the
-/// partition's catalog entries. The call is idempotent.
+/// The creation runs in its own transaction under a table-wide advisory
+/// lock, so concurrent callers (startup, maintenance, and load paths)
+/// serialize instead of racing on the partition's catalog entries. One
+/// shared lock is required: moving rows out of the DEFAULT partition holds
+/// a lock on it while creating the partition, so per-month locks could
+/// deadlock across months. The call is idempotent.
 pub async fn ensure_month_partition(
     pool: &PgPool,
     year: i32,
@@ -530,15 +532,45 @@ pub async fn ensure_month_partition(
         start.format("%Y-%m-%d"),
         next.format("%Y-%m-%d")
     );
-    let month_key = i32::try_from(month)
-        .map_err(|_| TemporalError::invalid_time("partition month out of range"))?;
 
     let mut tx = pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
-        .bind(start.year())
-        .bind(month_key)
-        .execute(&mut *tx)
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('market_observations_partitions', 0))",
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    let exists: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+        .bind(&name)
+        .fetch_one(&mut *tx)
         .await?;
+    if exists {
+        tx.commit().await?;
+        return Ok(());
+    }
+
+    // Rows written before this month had a partition live in the DEFAULT
+    // partition, and Postgres refuses to attach a partition whose range they
+    // occupy. Move them aside, create the partition, then put them in it.
+    sqlx::query(
+        "CREATE TEMP TABLE moved_market_observations ON COMMIT DROP AS \
+         SELECT * FROM market_observations_default \
+         WHERE valid_at >= $1 AND valid_at < $2",
+    )
+    .bind(start)
+    .bind(next)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM market_observations_default \
+         WHERE valid_at >= $1 AND valid_at < $2",
+    )
+    .bind(start)
+    .bind(next)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(AssertSqlSafe(sql)).execute(&mut *tx).await?;
+    let sql = format!("INSERT INTO {name} SELECT * FROM moved_market_observations");
     sqlx::query(AssertSqlSafe(sql)).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -15,6 +15,7 @@ use crate::domain::asset_identifier::read as asset_identifier_read;
 use crate::domain::id::AssetId;
 use crate::domain::id::DomainId;
 use crate::market_data::audit::{DataSourceRefreshCounters, finish_refresh_run, start_refresh_run};
+use crate::market_data::calendar::{latest_completed_session, stored_daily_dates};
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::registry::DataSourceRegistry;
 use crate::market_data::types::{LatestBarRequest, TypedIdentifier};
@@ -65,6 +66,8 @@ pub struct RefreshSummary {
     pub assets_missing_identifier: i64,
     /// Assets where the source returned a typed retryable error.
     pub assets_source_unavailable: i64,
+    /// Latest completed session resolved for the last processed asset.
+    pub latest_completed_session: Option<chrono::NaiveDate>,
 }
 
 /// Fact type written by `run_refresh` for end-of-day OHLCV bars.
@@ -98,6 +101,7 @@ pub async fn run_refresh(
     let mut counters = DataSourceRefreshCounters::default();
     let mut per_source_attempted: HashMap<String, i64> = HashMap::new();
     let mut per_source_failed: HashMap<String, i64> = HashMap::new();
+    let mut latest_session = None;
 
     for asset_id in assets_to_process {
         let identifier = match asset_identifier_read::list_asset_identifiers(pool, asset_id).await {
@@ -115,6 +119,30 @@ pub async fn run_refresh(
                 continue;
             }
         };
+
+        let completed = latest_completed_session(pool, asset_id, Utc::now())
+            .await
+            .map_err(|error| {
+                MarketDataProviderError::Infrastructure(format!(
+                    "latest completed session: {error}"
+                ))
+            })?;
+        latest_session = completed;
+        if let Some(completed) = completed {
+            let today = Utc::now().date_naive();
+            let from = today
+                .checked_sub_signed(Duration::days(366))
+                .unwrap_or(today);
+            let stored = stored_daily_dates(pool, asset_id.0, from, today)
+                .await
+                .map_err(|error| {
+                    MarketDataProviderError::Infrastructure(format!("stored dates: {error}"))
+                })?;
+            if stored.last().is_some_and(|date| *date >= completed) {
+                counters.no_op += 1;
+                continue;
+            }
+        }
 
         let request = LatestBarRequest {
             identifier: typed_id,
@@ -198,6 +226,7 @@ pub async fn run_refresh(
         assets_no_op: counters.no_op,
         assets_missing_identifier: counters.missing_identifier,
         assets_source_unavailable: counters.source_unavailable,
+        latest_completed_session: latest_session,
     })
 }
 

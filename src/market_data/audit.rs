@@ -254,6 +254,8 @@ pub struct LoadRunRow {
     pub not_resolved: i32,
     /// The source holds no value for that date.
     pub no_data_for_date: i32,
+    /// The exchange calendar closed the date without a provider call.
+    pub calendar_closed: i32,
     /// No enabled source claims the identifier's scheme.
     pub unsupported_scheme: i32,
     /// The source refused the request.
@@ -387,7 +389,7 @@ impl LoadRunContext {
 /// The shared SELECT for a load-run row, including the 0010 columns.
 const LOAD_RUN_SELECT: &str = "SELECT id, started_at, ended_at, trigger, requested_source, \
      identifiers_requested_raw, identifiers_duplicated, identifiers_attempted, \
-     loaded, no_op, not_resolved, no_data_for_date, unsupported_scheme, \
+     loaded, no_op, not_resolved, no_data_for_date, calendar_closed, unsupported_scheme, \
      rejected, source_unavailable, rate_limited, storage_failure, \
      assets_created, assets_adopted, per_source_attempted, per_source_failed, \
      per_identifier, duration_ms, data_domain, as_of_date, range_group_id, \
@@ -519,7 +521,8 @@ pub async fn finish_load_run(
              per_identifier = $18, \
              answering_sources = $19, \
              duration_ms = (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint, \
-             terminal_status = $20 \
+             terminal_status = $20, \
+             calendar_closed = $21 \
          WHERE id = $1",
     )
     .bind(run_id)
@@ -542,6 +545,7 @@ pub async fn finish_load_run(
     .bind(per_identifier)
     .bind(&answering_sources)
     .bind(terminal_status_for_counters(counters))
+    .bind(counters.calendar_closed as i32)
     .execute(pool)
     .await
     .map_err(|e| MarketDataProviderError::Infrastructure(format!("finish_load_run: {e}")))?;

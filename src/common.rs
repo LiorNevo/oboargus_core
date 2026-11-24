@@ -109,6 +109,12 @@ const TABLES: &[&str] = &[
     "automation_triggers",
     "automation_flow_versions",
     "automation_flows",
+    // Exchange calendars (spec 035). Children first.
+    "exchange_calendar_audit",
+    "asset_calendar_assignments",
+    "exchange_calendar_exceptions",
+    "exchange_calendar_weekdays",
+    "exchange_calendars",
     // Morpheus chat (spec 032). Children first.
     "morpheus_observations",
     "morpheus_approval_requests",

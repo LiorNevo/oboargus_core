@@ -118,6 +118,67 @@ async fn range_helper_covers_every_month_and_year_rollover() {
 }
 
 #[tokio::test]
+async fn rows_already_in_the_default_partition_move_into_a_new_month() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    seed_temporal_fixture(&pool).await;
+
+    // A row written before its month had a partition lands in DEFAULT. A
+    // previous run may have left the partition behind, so clear it first.
+    sqlx::query("DROP TABLE IF EXISTS market_observations_2042_04")
+        .execute(&pool)
+        .await
+        .expect("reset partition");
+    let when = date(2042, 4, 15);
+    let row = append_observation(&pool, observation(when, when))
+        .await
+        .expect("append observation");
+    let table: String = sqlx::query_scalar(
+        "SELECT tableoid::regclass::text FROM market_observations WHERE id = $1",
+    )
+    .bind(row.id)
+    .fetch_one(&pool)
+    .await
+    .expect("table oid");
+    assert_eq!(table, "market_observations_default");
+
+    ensure_month_partition(&pool, 2042, 4)
+        .await
+        .expect("create partition over default rows");
+
+    let moved: String = sqlx::query_scalar(
+        "SELECT tableoid::regclass::text FROM market_observations WHERE id = $1",
+    )
+    .bind(row.id)
+    .fetch_one(&pool)
+    .await
+    .expect("moved row");
+    assert_eq!(moved, "market_observations_2042_04");
+
+    guard.cleanup().await;
+}
+
+#[tokio::test]
+async fn concurrent_creation_across_months_does_not_deadlock() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+
+    let attempts = (1..=4).map(|month| {
+        let pool = pool.clone();
+        async move { ensure_month_partition(&pool, 2043, month).await }
+    });
+    let results = futures::future::join_all(attempts).await;
+    assert!(
+        results.iter().all(Result::is_ok),
+        "every month must be creatable concurrently: {results:?}"
+    );
+
+    guard.cleanup().await;
+}
+
+#[tokio::test]
 async fn concurrent_creation_serializes_on_the_advisory_lock() {
     let Some((pool, guard)) = tx_pool().await else {
         return;

@@ -24,14 +24,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::{NaiveDate, Utc};
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::market_data::audit::LoadRunContext;
+use crate::market_data::calendar::CalendarCache;
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::load::{
-    IdentifierLoadConfig, IdentifierLoadReport, RunStatus, run_identifier_load_with_snapshot,
-    validate_as_of_date, validate_identifier_pair, validate_preferred_source_with_snapshot,
+    IdentifierLoadConfig, IdentifierLoadReport, RunStatus,
+    run_identifier_load_with_snapshot_and_calendar, validate_as_of_date, validate_identifier_pair,
+    validate_preferred_source_with_snapshot,
 };
 use crate::market_data::registry::{DataSourceRegistry, RegistrySnapshot};
 use crate::market_data::types::TypedIdentifier;
@@ -97,6 +100,8 @@ pub struct DateLoadSummary {
     pub not_resolved: usize,
     /// The source holds no value for that date.
     pub no_data_for_date: usize,
+    /// The exchange calendar closed the date without a provider call.
+    pub calendar_closed: usize,
     /// No enabled source claims the identifier's scheme.
     pub unsupported_scheme: usize,
     /// The source refused the request.
@@ -137,6 +142,7 @@ impl DateLoadSummary {
             no_op: report.no_op,
             not_resolved: report.not_resolved,
             no_data_for_date: report.no_data_for_date,
+            calendar_closed: report.calendar_closed,
             unsupported_scheme: report.unsupported_scheme,
             rejected: report.rejected,
             source_unavailable: report.source_unavailable,
@@ -173,6 +179,8 @@ pub struct RangeLoadTotals {
     pub not_resolved: usize,
     /// The source holds no value for that date.
     pub no_data_for_date: usize,
+    /// The exchange calendar closed the date without a provider call.
+    pub calendar_closed: usize,
     /// No enabled source claims the identifier's scheme.
     pub unsupported_scheme: usize,
     /// The source refused the request.
@@ -222,6 +230,8 @@ pub struct IdentifierRangeLoadReport {
     /// Dates whose section neither wrote nor confirmed a row
     /// (`loaded == 0` and `no_op == 0`) — weekends, holidays and gaps.
     pub dates_with_nothing_stored: usize,
+    /// Dates where every requested line was a full-day calendar closure.
+    pub dates_fully_closed: usize,
     /// The dates' counters, summed.
     pub totals: RangeLoadTotals,
     /// One run-audit id per date, in date order (`null` for a dry run).
@@ -394,6 +404,7 @@ async fn run_identifier_range_load_with_snapshot_cancellable(
     let range_from = config.from;
     let range_to = config.to;
     let concurrency = config.concurrency;
+    let calendar = Arc::new(Mutex::new(CalendarCache::new(range_from, range_to)));
 
     // Each date collapses to a summary as soon as its child report exists, so
     // peak memory is `concurrency × identifiers`, never
@@ -401,6 +412,7 @@ async fn run_identifier_range_load_with_snapshot_cancellable(
     let mut results: Vec<(NaiveDate, Result<DateLoadSummary, MarketDataProviderError>)> =
         stream::iter(requested_dates.into_iter().map(|date| {
             let per_date = config_for_date(&config, date);
+            let calendar = Arc::clone(&calendar);
             let per_date_context = LoadRunContext::range(
                 data_domain,
                 date,
@@ -420,9 +432,15 @@ async fn run_identifier_range_load_with_snapshot_cancellable(
                 }
                 Some((
                     date,
-                    run_identifier_load_with_snapshot(pool, snapshot, per_date, &per_date_context)
-                        .await
-                        .map(|report| DateLoadSummary::from_report(date, report)),
+                    run_identifier_load_with_snapshot_and_calendar(
+                        pool,
+                        snapshot,
+                        per_date,
+                        &per_date_context,
+                        Some(calendar),
+                    )
+                    .await
+                    .map(|report| DateLoadSummary::from_report(date, report)),
                 ))
             }
         }))
@@ -573,6 +591,7 @@ fn build_range_report(
     let mut totals = RangeLoadTotals::default();
     let mut dates_with_loads = 0usize;
     let mut dates_with_nothing_stored = 0usize;
+    let mut dates_fully_closed = 0usize;
     let mut dates_failed = 0usize;
 
     for summary in &summaries {
@@ -581,6 +600,7 @@ fn build_range_report(
         totals.no_op += summary.no_op;
         totals.not_resolved += summary.not_resolved;
         totals.no_data_for_date += summary.no_data_for_date;
+        totals.calendar_closed += summary.calendar_closed;
         totals.unsupported_scheme += summary.unsupported_scheme;
         totals.rejected += summary.rejected;
         totals.source_unavailable += summary.source_unavailable;
@@ -597,6 +617,20 @@ fn build_range_report(
         }
         if summary.loaded == 0 && summary.no_op == 0 {
             dates_with_nothing_stored += 1;
+        }
+        if summary.calendar_closed > 0
+            && summary.identifiers_attempted == 0
+            && summary.not_resolved == 0
+            && summary.loaded == 0
+            && summary.no_op == 0
+            && summary.no_data_for_date == 0
+            && summary.rejected == 0
+            && summary.source_unavailable == 0
+            && summary.rate_limited == 0
+            && summary.storage_failure == 0
+            && summary.unsupported_scheme == 0
+        {
+            dates_fully_closed += 1;
         }
     }
 
@@ -617,6 +651,7 @@ fn build_range_report(
         dates_failed,
         dates_with_loads,
         dates_with_nothing_stored,
+        dates_fully_closed,
         totals,
         run_ids,
         dates: summaries,
@@ -943,6 +978,7 @@ mod tests {
             no_op: 0,
             not_resolved: 0,
             no_data_for_date: 0,
+            calendar_closed: 0,
             unsupported_scheme: 0,
             rejected: 0,
             source_unavailable: 0,

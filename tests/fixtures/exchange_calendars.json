@@ -1,0 +1,41 @@
+{
+  "mic": "XTST",
+  "name": "Deterministic test venue",
+  "time_zone": "America/New_York",
+  "coverage_from": "2026-01-01",
+  "coverage_to": "2026-12-31",
+  "weekdays": [
+    { "iso_weekday": 1, "open": "09:30", "close": "16:00" },
+    { "iso_weekday": 2, "open": "09:30", "close": "16:00" },
+    { "iso_weekday": 3, "open": "09:30", "close": "16:00" },
+    { "iso_weekday": 4, "open": "09:30", "close": "16:00" },
+    { "iso_weekday": 5, "open": "09:30", "close": "16:00" }
+  ],
+  "exceptions": [
+    {
+      "date": "2026-11-26",
+      "kind": "closure",
+      "open": null,
+      "close": null,
+      "reason": "Holiday"
+    },
+    {
+      "date": "2026-11-27",
+      "kind": "early_close",
+      "open": null,
+      "close": "13:00",
+      "reason": "Early close"
+    },
+    {
+      "date": "2026-11-28",
+      "kind": "session",
+      "open": "09:30",
+      "close": "13:00",
+      "reason": "Extraordinary session"
+    }
+  ],
+  "source": "fixture",
+  "provenance": "Deterministic test fixture",
+  "version": 1,
+  "active": true
+}

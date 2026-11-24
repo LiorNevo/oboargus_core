@@ -58,6 +58,12 @@ pub const TABLES: &[&str] = &[
     "automation_triggers",
     "automation_flow_versions",
     "automation_flows",
+    // Exchange calendars (spec 035). Children first.
+    "exchange_calendar_audit",
+    "asset_calendar_assignments",
+    "exchange_calendar_exceptions",
+    "exchange_calendar_weekdays",
+    "exchange_calendars",
     // Morpheus chat (spec 032). Children first.
     "morpheus_observations",
     "morpheus_approval_requests",
@@ -187,6 +193,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), DomainError> {
         ))));
     }
     let catalog = crate::temporal::catalog::sync_fact_catalog(pool).await;
+    let calendars = crate::market_data::calendar::seed::seed_bundled_calendars(pool).await;
     let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
         .bind(MIGRATION_LOCK_KEY)
         .execute(&mut lock_conn)
@@ -194,7 +201,9 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), DomainError> {
     catalog.map_err(|error| match error {
         crate::temporal::TemporalError::Infrastructure(inner) => DomainError::Infrastructure(inner),
         other => DomainError::Validation(other.to_string()),
-    })
+    })?;
+    calendars?;
+    Ok(())
 }
 
 /// Return the total row count across every high-level table
@@ -530,19 +539,22 @@ mod tests {
             Some(idx) => format!("{}/postgres", &test_url[..idx]),
             None => return,
         };
-        let scratch = "obolargus_bin_helpers_cov_scratch";
+        let scratch = format!(
+            "obolargus_bin_helpers_cov_{}",
+            uuid::Uuid::new_v4().simple()
+        );
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime");
         // First call: database doesn't exist yet → creates it → returns Ok(true).
-        let first = rt.block_on(ensure_test_database(&admin, scratch));
+        let first = rt.block_on(ensure_test_database(&admin, &scratch));
         assert!(first.is_ok(), "ensure_test_database first call: {first:?}");
         assert!(first.unwrap(), "first call must create the database");
 
         // Second call: database now exists → returns Ok(false).
-        let second = rt.block_on(ensure_test_database(&admin, scratch));
+        let second = rt.block_on(ensure_test_database(&admin, &scratch));
         assert!(
             second.is_ok(),
             "ensure_test_database second call: {second:?}"
