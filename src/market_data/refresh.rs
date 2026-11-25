@@ -15,7 +15,7 @@ use crate::domain::asset_identifier::read as asset_identifier_read;
 use crate::domain::id::AssetId;
 use crate::domain::id::DomainId;
 use crate::market_data::audit::{DataSourceRefreshCounters, finish_refresh_run, start_refresh_run};
-use crate::market_data::calendar::{latest_completed_session, stored_daily_dates};
+use crate::market_data::calendar::{session_state, stored_daily_dates};
 use crate::market_data::error::MarketDataProviderError;
 use crate::market_data::registry::DataSourceRegistry;
 use crate::market_data::types::{LatestBarRequest, TypedIdentifier};
@@ -85,11 +85,38 @@ pub const FACT_TYPE_MARKET_PRICE: &str = "market_price";
 /// `INSERT … VALUES (…, today(), …)` and the read-back resolves "current"
 /// to the latest knowledge.
 ///
+/// This variant stops at the latest completed session. Use
+/// [`run_refresh_including_current`] when the caller also wants the current
+/// in-progress session's provisional daily bar.
+///
 /// Implements FR-007 / FR-013 / FR-014 / FR-030..FR-032 of spec 017.
 pub async fn run_refresh(
     pool: &sqlx::PgPool,
     registry: &DataSourceRegistry,
     config: RefreshConfig,
+) -> Result<RefreshSummary, MarketDataProviderError> {
+    run_refresh_inner(pool, registry, config, false).await
+}
+
+/// Drives a refresh run that also updates the current session's daily bar.
+///
+/// The current session's bar is provisional and may change until the venue
+/// closes. This variant is used by the chart's latest-bar refresh and the
+/// end-of-day task; scheduled and CLI refreshes keep the completed-only
+/// behavior of [`run_refresh`]. Implements FR-020 / FR-041 of spec 035.
+pub async fn run_refresh_including_current(
+    pool: &sqlx::PgPool,
+    registry: &DataSourceRegistry,
+    config: RefreshConfig,
+) -> Result<RefreshSummary, MarketDataProviderError> {
+    run_refresh_inner(pool, registry, config, true).await
+}
+
+async fn run_refresh_inner(
+    pool: &sqlx::PgPool,
+    registry: &DataSourceRegistry,
+    config: RefreshConfig,
+    include_current_session: bool,
 ) -> Result<RefreshSummary, MarketDataProviderError> {
     let run_row = start_refresh_run(pool, &config.trigger).await?;
 
@@ -120,16 +147,13 @@ pub async fn run_refresh(
             }
         };
 
-        let completed = latest_completed_session(pool, asset_id, Utc::now())
-            .await
-            .map_err(|error| {
-                MarketDataProviderError::Infrastructure(format!(
-                    "latest completed session: {error}"
-                ))
-            })?;
+        let now = Utc::now();
+        let (completed, current) = session_state(pool, asset_id, now).await.map_err(|error| {
+            MarketDataProviderError::Infrastructure(format!("session state: {error}"))
+        })?;
         latest_session = completed;
         if let Some(completed) = completed {
-            let today = Utc::now().date_naive();
+            let today = now.date_naive();
             let from = today
                 .checked_sub_signed(Duration::days(366))
                 .unwrap_or(today);
@@ -138,7 +162,14 @@ pub async fn run_refresh(
                 .map_err(|error| {
                     MarketDataProviderError::Infrastructure(format!("stored dates: {error}"))
                 })?;
-            if stored.last().is_some_and(|date| *date >= completed) {
+            // The current session's daily bar is provisional and keeps changing
+            // while the venue trades, so the chart refresh fetches it even when
+            // today's earlier partial bar is already stored.
+            // shortcut: the current date uses UTC until venue-local session
+            // state is exposed; upgrade when intraday venue clocks land.
+            let current_session =
+                include_current_session && current.is_some_and(|date| date >= today);
+            if stored.last().is_some_and(|date| *date >= completed) && !current_session {
                 counters.no_op += 1;
                 continue;
             }

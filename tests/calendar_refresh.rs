@@ -13,9 +13,13 @@ use obolargus_core::common::tx_pool;
 use obolargus_core::domain::asset::create::create_asset_with_identifier;
 use obolargus_core::domain::asset::entity::NewAsset;
 use obolargus_core::domain::id::AssetId;
-use obolargus_core::market_data::calendar::{latest_completed_session, seed_bundled_calendars};
+use obolargus_core::market_data::calendar::{
+    current_session_candidate, latest_completed_session, seed_bundled_calendars,
+};
 use obolargus_core::market_data::error::MarketDataProviderError;
-use obolargus_core::market_data::refresh::{RefreshConfig, run_refresh};
+use obolargus_core::market_data::refresh::{
+    RefreshConfig, run_refresh, run_refresh_including_current,
+};
 use obolargus_core::market_data::registry::DataSourceRegistry;
 use obolargus_core::market_data::trait_::MarketDataProvider;
 use obolargus_core::market_data::types::{
@@ -196,6 +200,52 @@ async fn a_stored_latest_session_skips_the_provider() {
     assert_eq!(provider.calls(), 0);
     assert_eq!(summary.assets_no_op, 1);
     assert_eq!(summary.assets_refreshed, 0);
+    assert_eq!(summary.latest_completed_session, Some(completed));
+    guard.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_current_session_refreshes_before_it_closes() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    let asset = seed(&pool).await;
+    let now = Utc::now();
+    let Some(current) = current_session_candidate(&pool, asset, now)
+        .await
+        .expect("current session")
+    else {
+        guard.cleanup().await;
+        return;
+    };
+    let Some(completed) = latest_completed_session(&pool, asset, now)
+        .await
+        .expect("latest session")
+    else {
+        guard.cleanup().await;
+        return;
+    };
+    if current <= completed {
+        guard.cleanup().await;
+        return;
+    }
+    store(&pool, asset, completed).await;
+
+    let provider = Arc::new(LatestProvider::new(current));
+    let registry = LatestProvider::registry(Arc::clone(&provider));
+    let summary = run_refresh_including_current(
+        &pool,
+        &registry,
+        RefreshConfig {
+            assets: Some(vec![asset]),
+            trigger: "test".into(),
+        },
+    )
+    .await
+    .expect("refresh");
+    assert_eq!(provider.calls(), 1);
+    assert_eq!(summary.assets_refreshed, 1);
+    assert_eq!(summary.assets_no_op, 0);
     assert_eq!(summary.latest_completed_session, Some(completed));
     guard.cleanup().await;
 }

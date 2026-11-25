@@ -6,14 +6,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use obolargus_core::common::tx_pool;
 use obolargus_core::domain::asset::create::create_asset_with_identifier;
 use obolargus_core::domain::asset::entity::NewAsset;
 use obolargus_core::domain::id::AssetId;
-use obolargus_core::market_data::calendar::seed_bundled_calendars;
+use obolargus_core::market_data::calendar::{current_session_candidate, seed_bundled_calendars};
 use obolargus_core::market_data::error::MarketDataProviderError;
 use obolargus_core::market_data::history_load::{HistoryLoadConfig, run_asset_history_load};
 use obolargus_core::market_data::registry::DataSourceRegistry;
@@ -170,6 +170,33 @@ async fn an_entirely_closed_window_returns_without_a_provider_call() {
     assert!(!report.no_data);
     assert_eq!(provider.calls(), 0);
     assert_eq!(report.loaded, 0);
+    guard.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_current_session_loads_before_it_closes() {
+    let Some((pool, guard)) = tx_pool().await else {
+        return;
+    };
+    let asset = seed(&pool).await;
+    let now = Utc::now();
+    let Some(today) = current_session_candidate(&pool, asset, now)
+        .await
+        .expect("current session")
+    else {
+        guard.cleanup().await;
+        return;
+    };
+    let today_text = today.format("%Y-%m-%d").to_string();
+    let provider = Arc::new(RangeProvider::new(&[&today_text]));
+    let registry = RangeProvider::registry(Arc::clone(&provider));
+    let report = run_asset_history_load(&pool, &registry, config(asset, &today_text, &today_text))
+        .await
+        .expect("history");
+    assert_eq!(report.expected_sessions, 0);
+    assert_eq!(provider.calls(), 1);
+    assert_eq!(report.loaded, 1);
+    assert!(!report.no_data);
     guard.cleanup().await;
 }
 

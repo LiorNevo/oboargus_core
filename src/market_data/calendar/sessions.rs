@@ -141,6 +141,38 @@ pub fn expected_sessions_for_segments(
     sessions.into_iter().collect()
 }
 
+/// Returns `date` when a session is scheduled for it, whether or not it has
+/// opened or closed yet.
+///
+/// Exact segments use the calendar; non-exact segments keep the weekday
+/// approximation. This is used to allow loading and refreshing the current
+/// session's in-progress daily bar without treating the date as a completed
+/// expected session. Implements FR-015 of spec 035.
+pub fn current_session_for_segments(
+    segments: &[CalendarSegment],
+    calendars: &BTreeMap<String, ExchangeCalendar>,
+    date: NaiveDate,
+) -> Option<NaiveDate> {
+    for segment in segments {
+        if date < segment.from || date > segment.to {
+            continue;
+        }
+        if segment.exact
+            && let Some(mic) = &segment.mic
+            && let Some(calendar) = calendars.get(mic)
+        {
+            if is_trading_day(calendar, date) {
+                return Some(date);
+            }
+            continue;
+        }
+        if date.weekday().number_from_monday() <= 5 {
+            return Some(date);
+        }
+    }
+    None
+}
+
 /// Returns the completed session dates for a calendar in one range.
 pub fn sessions_for_calendar(
     calendar: &ExchangeCalendar,
@@ -155,7 +187,7 @@ pub fn sessions_for_calendar(
 mod tests {
     use super::*;
     use crate::market_data::calendar::entity::{
-        CalendarException, CalendarExceptionKind, CalendarWeekday, ExchangeCalendar,
+        CalendarException, CalendarExceptionKind, CalendarWeekday, ExchangeCalendar, SegmentReason,
     };
 
     fn calendar(exceptions: Vec<CalendarException>) -> ExchangeCalendar {
@@ -203,6 +235,44 @@ mod tests {
         assert_eq!(
             sessions,
             vec![date("2026-11-20"), date("2026-11-23"), date("2026-11-24")]
+        );
+    }
+
+    #[test]
+    fn current_session_is_available_before_its_close() {
+        let calendar = calendar(Vec::new());
+        let session_date = date("2026-11-25");
+        let before_close = now("2026-11-25T15:00:00Z");
+        assert!(expected_sessions(&calendar, session_date, session_date, before_close).is_empty());
+        let segments = vec![CalendarSegment {
+            mic: Some("XNAS".into()),
+            name: Some("Test venue".into()),
+            from: session_date,
+            to: session_date,
+            exact: true,
+            reason: None,
+        }];
+        let calendars = BTreeMap::from([("XNAS".to_string(), calendar)]);
+        assert_eq!(
+            current_session_for_segments(&segments, &calendars, session_date),
+            Some(session_date)
+        );
+    }
+
+    #[test]
+    fn current_session_is_not_available_on_a_weekend() {
+        let session_date = date("2026-11-28");
+        let segments = vec![CalendarSegment {
+            mic: None,
+            name: None,
+            from: session_date,
+            to: session_date,
+            exact: false,
+            reason: Some(SegmentReason::NoVenue),
+        }];
+        assert_eq!(
+            current_session_for_segments(&segments, &BTreeMap::new(), session_date),
+            None
         );
     }
 

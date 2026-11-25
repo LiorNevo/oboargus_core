@@ -8,8 +8,8 @@ use crate::domain::id::{AssetId, DomainId};
 
 use super::entity::AssetCoverage;
 use super::read::stored_daily_dates;
-use super::resolve::{calendars_for_asset, resolve_for_asset};
-use super::sessions::expected_sessions_for_segments;
+use super::resolve::{calendars_for_asset, resolve_for_asset, resolve_timeline};
+use super::sessions::{current_session_for_segments, expected_sessions_for_segments};
 
 /// Computes the calendar-aware coverage for one asset and inclusive date range.
 ///
@@ -51,6 +51,26 @@ pub async fn asset_coverage(
     })
 }
 
+/// Resolves the latest completed session and the current session candidate.
+///
+/// `current_session_candidate` is `Some(today)` when a session is scheduled
+/// for today even if it has not closed. It never counts as a completed session.
+/// Implements FR-015 / FR-020 of spec 035.
+pub async fn session_state(
+    pool: &PgPool,
+    asset_id: AssetId,
+    now: DateTime<Utc>,
+) -> Result<(Option<chrono::NaiveDate>, Option<chrono::NaiveDate>), DomainError> {
+    let today = now.date_naive();
+    let from = today
+        .checked_sub_signed(Duration::days(366))
+        .ok_or_else(|| DomainError::Validation("date range underflow".to_string()))?;
+    let (segments, calendars) = resolve_timeline(pool, asset_id, from, today).await?;
+    let sessions = expected_sessions_for_segments(&segments, &calendars, now);
+    let current = current_session_for_segments(&segments, &calendars, today);
+    Ok((sessions.last().copied(), current))
+}
+
 /// Finds the latest completed expected session on or before `now`.
 ///
 /// The walk is bounded to one year plus a day; a longer continuous closure is
@@ -60,12 +80,15 @@ pub async fn latest_completed_session(
     asset_id: AssetId,
     now: DateTime<Utc>,
 ) -> Result<Option<chrono::NaiveDate>, DomainError> {
-    let today = now.date_naive();
-    let from = today
-        .checked_sub_signed(Duration::days(366))
-        .ok_or_else(|| DomainError::Validation("date range underflow".to_string()))?;
-    let segments = resolve_for_asset(pool, asset_id, from, today).await?;
-    let calendars = calendars_for_asset(pool, asset_id, from, today).await?;
-    let sessions = expected_sessions_for_segments(&segments, &calendars, now);
-    Ok(sessions.last().copied())
+    Ok(session_state(pool, asset_id, now).await?.0)
+}
+
+/// Returns today when a session is scheduled for it, even before it closes.
+/// Implements FR-015 of spec 035.
+pub async fn current_session_candidate(
+    pool: &PgPool,
+    asset_id: AssetId,
+    now: DateTime<Utc>,
+) -> Result<Option<chrono::NaiveDate>, DomainError> {
+    Ok(session_state(pool, asset_id, now).await?.1)
 }

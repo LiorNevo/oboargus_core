@@ -19,8 +19,8 @@ use crate::domain::asset_identifier::read::list_asset_identifiers;
 use crate::domain::id::AssetId;
 use crate::market_data::audit::{LoadRunContext, finish_load_run, start_load_run_with_context};
 use crate::market_data::calendar::{
-    CalendarExceptionKind, CalendarSegment, ExchangeCalendar, expected_sessions_for_segments,
-    is_trading_day, resolve_timeline,
+    CalendarExceptionKind, CalendarSegment, ExchangeCalendar, current_session_for_segments,
+    expected_sessions_for_segments, is_trading_day, resolve_timeline,
 };
 use crate::market_data::data_domain::DataDomain;
 use crate::market_data::error::MarketDataProviderError;
@@ -247,6 +247,8 @@ pub async fn run_asset_history_load(
             MarketDataProviderError::Infrastructure(format!("calendar resolution: {error}"))
         })?;
     let expected = expected_sessions_for_segments(&segments, &calendars, Utc::now());
+    let current_session =
+        current_session_for_segments(&segments, &calendars, Utc::now().date_naive());
     let closed_dates = counted_closures(&segments, &calendars, config.from, config.to);
     let calendar_mic = {
         let mics: BTreeSet<_> = segments
@@ -291,7 +293,9 @@ pub async fn run_asset_history_load(
     )
     .await?;
 
-    if expected_sessions == 0 {
+    let current_session_in_range =
+        current_session.is_some_and(|date| date >= config.from && date <= config.to);
+    if expected_sessions == 0 && !current_session_in_range {
         let counters = DataSourceLoadCounters {
             calendar_closed: closed_sessions as i64,
             ..DataSourceLoadCounters::default()
